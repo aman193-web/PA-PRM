@@ -48,7 +48,7 @@ Data persists in browser localStorage under `minute-v1`. Deploying the static ap
 
 ## Interface
 
-The existing PRM blue/orange palette, compact Tabler components, light sidebar, welcome animation, and centered onboarding remain. Every refresh starts at welcome, then explicit Salesforce connection and the read-only program overview. Demo passwords are never stored or sent.
+The existing PRM blue/orange palette, compact Tabler components, light sidebar, welcome animation, and centered onboarding remain. Every refresh starts at welcome, then optional Salesforce connection and the read-only program overview. Connect later skips the connection and unlocks the dashboard. Partners can connect from Salesforce updates later; submitted updates remain queued until then. Demo passwords are never stored or sent.
 
 Portal screens share one heading component and spacing tokens. The sidebar has one Leads entry. My Leads, CRM Assigned Leads, and My Deals are tabs inside the sales workspace. Flow and list views share category, search, and status filters. Draft columns display at most two cards; View all drafts opens the complete filtered list. Details show origin, destination, next action, canonical customer data, activities, follow-ups, and timestamped history. Dashboard totals, notifications, search, and CSV export use the same authorized records. Salesforce updates is a partner status/activity view with retry controls, not CRM configuration. Vendor administration and team-management controls are absent; company/program information is view-only.
 
@@ -71,4 +71,4 @@ node --check dist/app.js
 node --test tests/*.test.cjs
 ```
 
-39 checks cover both full journeys, review/rejection/revision, duplicate/link behavior, validation, sync failure/retry/discard, reload persistence, CRM concurrency, partner permissions, notifications, navigation, forms, search/export, and markup structure. UI tests exercise event handlers in a DOM stub; they do not substitute for browser layout, native form validation, drag, or accessibility-engine testing. Browser visual inspection was unavailable because local-preview browser access was blocked by policy.
+42 checks cover both full journeys, review/rejection/revision, duplicate/link behavior, validation, sync failure/retry/discard, reload persistence, CRM concurrency, partner permissions, notifications, navigation, forms, search/export, and markup structure. UI tests exercise event handlers in a DOM stub; they do not substitute for browser layout, native form validation, drag, or accessibility-engine testing. Browser visual inspection was unavailable because local-preview browser access was blocked by policy.

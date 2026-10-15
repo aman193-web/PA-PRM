@@ -1294,3 +1294,6 @@ textarea { font-family: var(--ui-font); resize: vertical; }
 .draft-overflow b { display: inline-flex; align-items: center; gap: 8px; color: var(--brand); font-weight: 550; font-size: 13px; }
 .draft-overflow svg { width: 15px; height: 15px; }
 .draft-overflow:hover { border-color: var(--brand); background: #eef5ff; }
+.setup-connect-later { display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin: 12px auto 0; padding: 8px 12px; }
+.setup-connect-later svg { width: 16px; height: 16px; }
+.setup-connection .setup-optional-note { max-width: 340px; margin: 8px auto 0; font-size: 12px; line-height: 1.6; color: var(--muted); }

@@ -87,3 +87,16 @@ test('one sidebar Leads entry keeps all sales tabs accessible and highlights the
 test('Draft column displays two cards and View all drafts exposes the complete list',()=>{
  const a=environment();a.login();a.run("for(let i=0;i<4;i++)workflow.createLead({company:'Draft company '+i})");a.click({page:'leads'});const draftColumn=a.html().match(/<section class="lead-column"[\s\S]*?<\/section>/)[0];assert.equal((draftColumn.match(/class="card lead-card sales-card"/g)||[]).length,2);assert.match(draftColumn,/Showing 2 of 5 drafts/);act(a,'all-drafts');assert.equal(a.run('salesView'),'list');assert.equal(a.run('salesFilter'),'Draft');assert.match(a.html(),/5 of 6 records/);assert.match(a.html(),/Cedar Analytics/);for(let i=0;i<4;i++)assert.match(a.html(),new RegExp('Draft company '+i));
 });
+
+test('Connect later skips Salesforce without blocking program and dashboard access',()=>{
+ const a=environment();a.run('beginOnboarding()');assert.match(a.html(),/Connect later/);a.run("handleEntryAction('skip')");assert.equal(a.run('state.crm.connected'),false);assert.match(a.html(),/Connect CRM · Skipped/);assert.match(a.html(),/STEP 2 OF 2/);a.run("handleEntryAction('finish')");assert.equal(a.location.hash,'#dashboard');assert.equal(a.run('state.onboarding'),3);assert.match(a.html(),/Salesforce is not connected/);a.click({page:'leads'});assert.match(a.html(),/My Leads/);
+});
+
+test('skipped connection supports saved submissions and connecting later from the portal',()=>{
+ const a=environment();a.run("beginOnboarding();handleEntryAction('skip');handleEntryAction('finish')");act(a,'new-lead');a.submit('sales-record-form',leadValues);const id=a.run('detailRecord.id');act(a,'submit-lead','lead',id);assert.equal(a.location.hash,'#crm');assert.equal(a.run(`getRecord('lead','${id}').status`),'Draft');assert.equal(a.run(`getRecord('lead','${id}').sync.status`),'pending');assert.match(a.html(),/Connect Salesforce/);
+ act(a,'connect-salesforce');a.click({action:'close'});a.run('confirmSetupConnection()');assert.equal(a.run('state.crm.connected'),false);act(a,'connect-salesforce');a.element('confirm-setup-connection').onclick();assert.equal(a.run('state.crm.connected'),true);assert.equal(a.run('state.onboarding'),3);a.sync();assert.equal(a.run(`getRecord('lead','${id}').status`),'Submitted');assert.equal(a.location.hash,'#crm');
+});
+
+test('skip remains intentional through back navigation and resets with a new sign-in',()=>{
+ const a=environment();a.run("beginOnboarding();handleEntryAction('skip');handleEntryAction('back')");assert.match(a.html(),/STEP 1 OF 2/);a.run("handleEntryAction('skip');handleEntryAction('finish');signOut();beginOnboarding();handleEntryAction('finish')");assert.equal(a.run('state.crmSkipped'),false);assert.equal(a.run('state.onboarding'),0);assert.match(a.html(),/STEP 1 OF 2/);
+});

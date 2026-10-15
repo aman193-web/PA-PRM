@@ -15,7 +15,7 @@
 
 ## Partner-created lead to Won
 
-1. Complete demo sign-in, explicitly connect Salesforce, view the assigned program, enter the dashboard.
+1. Complete demo sign-in, connect Salesforce or select Connect later, view the assigned program, enter the dashboard.
 2. My Leads → Create lead. Enter customer, contact, email, positive estimated value, supported region, customer need, source, and sharing permission. Save draft.
 3. Open the draft → Submit lead. Observe pending synchronization, then Submitted. The vendor CRM now has the lead.
 4. Refresh Salesforce. The vendor qualifies the lead. A notification links back to the record. Qualification does not create an opportunity.
@@ -49,6 +49,8 @@
 
 All customers and Salesforce decisions are simulated. The hosted application still stores records per browser and origin. Authentication and partner isolation require a real backend before use with actual customer data. The GitHub Pages publication is a static demo with simulated authentication; use fictional data only.
 
-Automated verification: 23 domain scenarios and 16 UI-controller/markup scenarios. Both complete journeys are exercised through the same handlers used by the interface. Browser visual QA remains unavailable in this session.
+Automated verification: 23 domain scenarios and 19 UI-controller/markup scenarios. Both complete journeys are exercised through the same handlers used by the interface. Browser visual QA remains unavailable in this session.
 
 The final sidebar contains one Leads entry. Assigned leads and deals remain available through workspace tabs. Only two Draft cards are displayed; View all drafts shows every retained draft in list view. Welcome and onboarding were preserved unchanged during the partner-only and navigation refinements.
+
+Salesforce setup is optional: Connect later opens the program step and dashboard without marking the CRM connected. Submitted requests stay queued. Salesforce updates → Connect Salesforce opens the same confirmation flow in the portal and synchronizes saved requests after confirmation.
