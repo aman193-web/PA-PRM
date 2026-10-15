@@ -16,7 +16,7 @@ test('partner-created lead → submission → vendor qualification → registrat
  f.sync();assert.equal(l.status,'Qualified');assert.equal(l.dealId,undefined);
  const d=f.createDeal(dealValues(),l.id);assert.equal(d.registration,'Draft');assert.equal(l.dealId,d.id);assert.equal(d.leadId,l.id);
  f.submitDeal(d.id);f.sync();assert.equal(d.registration,'Approved');assert.equal(d.stage,'Discovery');assert.ok(d.opportunityId);
- for(const stage of ['Proposal','Negotiation','Won']){const before=d.stage;f.updateStage(d.id,stage,'Customer confirmed the agreement.');assert.equal(d.stage,before);f.sync();assert.equal(d.stage,stage);assert.equal(e.crm.opportunities[d.opportunityId].stage,stage);}
+ for(const stage of ['Proposal','Negotiation','Won']){const before=d.stage;f.updateStage(d.id,stage,'Customer confirmed the agreement.',stage==='Won'?{wonAmount:82000,closeDate:'2026-10-15'}:{});assert.equal(d.stage,before);f.sync();assert.equal(d.stage,stage);assert.equal(e.crm.opportunities[d.opportunityId].stage,stage);}
  assert.equal(l.status,'Qualified');assert.equal(d.registration,'Approved');assert.equal(d.stage,'Won');
  assert.ok(l.history.some(h=>h.title==='Vendor lead update'));assert.ok(d.history.length>=8);
  assert.ok(f.notifications().some(n=>n.recordId===d.id&&n.detail.includes('Won')));
@@ -32,7 +32,7 @@ test('CRM-assigned lead → accept → contact → follow-up → qualification �
  f.addActivity('lead',l.id,{type:'Follow-up',note:'Share the proposed implementation plan.',dueDate:'2026-10-20'});f.sync();
  const activity=l.activities.at(-1);assert.equal(activity.completed,false);f.completeActivity('lead',l.id,activity.id);f.sync();assert.equal(l.activities.at(-1).completed,true);
  f.qualify(l.id);f.sync();assert.equal(l.status,'Qualification requested');f.sync();assert.equal(l.status,'Qualified');
- const d=f.createDeal(dealValues(l.company),l.id);f.submitDeal(d.id);f.sync();f.updateStage(d.id,'Lost','Customer selected an existing supplier.');f.sync();
+ const d=f.createDeal(dealValues(l.company),l.id);f.submitDeal(d.id);f.sync();f.updateStage(d.id,'Lost','Customer selected an existing supplier.',{lostReason:'Competitor'});f.sync();
  assert.equal(d.stage,'Lost');assert.equal(d.registration,'Approved');assert.equal(l.status,'Qualified');assert.equal(l.receivedFrom,origin);
  assert.deepEqual(e.crm.leads[l.crmId].activities,l.activities);assert.equal(e.crm.opportunities[d.opportunityId].outcomeReason,d.outcomeReason);
 });
@@ -68,9 +68,9 @@ test('incomplete and invalid submissions fail with actionable validation',()=>{
 
 test('lead qualification and registration cannot be bypassed; opportunities follow legal transitions',()=>{
  const e=env(),f=e.flow,l=f.get('lead','L101');assert.throws(()=>f.createDeal(dealValues(),l.id),/qualification/);
- const d=approvedDeal(e,'Transition test');assert.throws(()=>f.updateStage(d.id,'Won','Won prematurely'),/next valid/);
+ const d=approvedDeal(e,'Transition test');assert.throws(()=>f.updateStage(d.id,'Won','Won without details'),/won amount/i);
  f.updateStage(d.id,'Proposal');f.sync();f.updateStage(d.id,'Negotiation');f.sync();assert.throws(()=>f.updateStage(d.id,'Won',''),/outcome note/);
- f.updateStage(d.id,'Won','Signed agreement');f.sync();assert.throws(()=>f.updateStage(d.id,'Discovery'),/next valid/);
+ f.updateStage(d.id,'Won','Signed agreement',{wonAmount:82000,closeDate:'2026-10-15'});f.sync();assert.throws(()=>f.updateStage(d.id,'Discovery'),/Closed opportunities/);
 });
 
 test('local duplicates are blocked; foreign CRM conflicts reject without exposing another partner',()=>{
@@ -145,5 +145,5 @@ test('queued edits preserve independent CRM changes and surface same-field confl
 });
 
 test('stage and activity requests preserve newer opportunity customer data and vendor notes',()=>{
- const e=env(),f=e.flow,d=f.get('deal','D103'),opp=e.crm.opportunities[d.opportunityId];f.updateStage(d.id,'Negotiation');opp.contact='New opportunity sponsor';opp.value=160000;f.sync();assert.equal(d.contact,'New opportunity sponsor');assert.equal(d.value,160000);f.addActivity('deal',d.id,{type:'Note',note:'Partner update'});opp.activities.push({id:'vendor-note',type:'Note',note:'Vendor update',time:fixed});f.sync();assert.ok(d.activities.some(a=>a.id==='vendor-note'));assert.equal(d.activities.at(-1).note,'Partner update');
+ const e=env(),f=e.flow,d=f.get('deal','D103'),opp=e.crm.opportunities[d.opportunityId];f.updateStage(d.id,'Negotiation');opp.contact='New opportunity sponsor';f.sync();assert.equal(d.contact,'New opportunity sponsor');assert.equal(d.value,125000);f.addActivity('deal',d.id,{type:'Note',note:'Partner update'});opp.activities.push({id:'vendor-note',type:'Note',note:'Vendor update',time:fixed});f.sync();assert.ok(d.activities.some(a=>a.id==='vendor-note'));assert.equal(d.activities.at(-1).note,'Partner update');
 });

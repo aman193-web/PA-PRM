@@ -22,9 +22,11 @@ Import this repository with Root Directory set to the repository root (`.`). The
 
 ## Connected sales journeys
 
-- **My Leads:** create a draft, review customer details and consent, then submit to vendor Salesforce. Submission and qualification are separate states. Vendor review can qualify, request more information, or disqualify a lead.
-- **CRM Assigned Leads:** accept or decline an assignment. Log a call or email before requesting qualification. Notes, follow-ups, and completion updates synchronize to the same CRM record.
-- **My Deals:** register a qualified lead or create a direct registration with confirmed customer need. Approval creates or links a Salesforce opportunity. Opportunity stages are Discovery, Proposal, Negotiation, Won, and Lost; final outcomes require a reason.
+- **My Leads:** save a draft or use Save & submit to send customer details and consent to vendor Salesforce. Submission and qualification are separate states. Vendor review can qualify, request more information, or disqualify a lead. Update & resubmit sends corrected information and a new review request together. Qualified customer identity is locked; contact name and job title remain editable until an active deal is linked.
+- **CRM Assigned Leads:** accept or decline an assignment. Log first contact records a Call or Email before requesting qualification. Notes and follow-ups alone do not mark a customer contacted. Activities and completion updates synchronize to the same CRM record; overdue follow-ups appear in the next-step guidance.
+- **My Deals:** register a qualified lead or create a direct registration with confirmed customer need. Save & submit performs both steps. Approval creates or links a Salesforce opportunity. Move forward through Discovery, Proposal, Negotiation, and Won, including skipping stages; move any open opportunity to Lost. Update value or expected close without moving stages. Won requires an actual amount, a close date no later than today, and an outcome note; revenue uses the actual amount while retaining the previous estimate. Lost requires a loss category and outcome note.
+
+Never-submitted drafts can be deleted with confirmation. Submitted or accepted leads can be closed with a reason and note when no active registration is linked. Pending or rejected registrations can be withdrawn, including a revised draft previously submitted to CRM. Closed leads and withdrawn registrations are read-only. A qualified lead can be registered again after rejection or withdrawal. Approval received before a withdrawal is processed produces a conflict: close the approved opportunity as Lost instead.
 
 Qualification, registration approval, and winning an opportunity are distinct. Leads never become Won directly. The lead retains its qualification status and links to the separate registration and opportunity.
 
@@ -71,4 +73,4 @@ node --check dist/app.js
 node --test tests/*.test.cjs
 ```
 
-42 checks cover both full journeys, review/rejection/revision, duplicate/link behavior, validation, sync failure/retry/discard, reload persistence, CRM concurrency, partner permissions, notifications, navigation, forms, search/export, and markup structure. UI tests exercise event handlers in a DOM stub; they do not substitute for browser layout, native form validation, drag, or accessibility-engine testing. Browser visual inspection was unavailable because local-preview browser access was blocked by policy.
+Tests cover both full journeys, qualification locks, draft deletion, close/withdraw/resubmit, actual won amounts and close dates, duplicate/link behavior, validation, sync failure/retry/discard, reload persistence, CRM concurrency, partner permissions, notifications, navigation, forms, search/export, and markup structure. UI tests exercise event handlers in a DOM stub; they do not substitute for browser layout, native form validation, drag, or accessibility-engine testing. Browser visual inspection was unavailable because local-preview browser access was blocked by policy.
