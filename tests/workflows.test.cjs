@@ -89,7 +89,7 @@ test('Draft column displays two cards and View all drafts exposes the complete l
 });
 
 test('Connect later skips Salesforce without blocking program and dashboard access',()=>{
- const a=environment();a.run('beginOnboarding()');assert.match(a.html(),/Connect later/);a.run("handleEntryAction('skip')");assert.equal(a.run('state.crm.connected'),false);assert.match(a.html(),/Connect CRM · Skipped/);assert.match(a.html(),/STEP 2 OF 2/);a.run("handleEntryAction('finish')");assert.equal(a.location.hash,'#dashboard');assert.equal(a.run('state.onboarding'),3);assert.match(a.html(),/Salesforce is not connected/);a.click({page:'leads'});assert.match(a.html(),/My Leads/);
+ const a=environment();a.run('beginOnboarding()');assert.match(a.html(),/Connect later/);a.run("handleEntryAction('skip')");assert.equal(a.run('state.crm.connected'),false);assert.match(a.html(),/Connect CRM · Skipped/);assert.match(a.html(),/STEP 2 OF 2/);a.run("handleEntryAction('finish')");assert.equal(a.location.hash,'#dashboard');assert.equal(a.run('state.onboarding'),3);assert.doesNotMatch(a.html(),/Salesforce simulation · Changes stay on this device|Salesforce is not connected/);a.click({page:'leads'});assert.match(a.html(),/My Leads/);
 });
 
 test('skipped connection supports saved submissions and connecting later from the portal',()=>{
