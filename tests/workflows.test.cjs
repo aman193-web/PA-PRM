@@ -27,7 +27,7 @@ test('UI creates and submits a lead, receives qualification, registers and close
 });
 
 test('assigned lead UI accepts, logs contact and follow-up, qualifies, registers, then closes Lost',()=>{
- const a=environment();a.login();a.click({page:'assigned'});act(a,'open','lead','L104');assert.match(a.overlay(),/FROM CRM/);assert.match(a.overlay(),/Vendor · Salesforce/);act(a,'accept','lead','L104');a.sync();assert.match(a.overlay(),/Log first contact/);
+ const a=environment();a.login();a.click({page:'assigned'});act(a,'open','lead','L104');assert.match(a.overlay(),/FROM CRM/);assert.match(a.overlay(),/Vendor · (NexaCloud|Vertex Software|Aster Platforms)/);act(a,'accept','lead','L104');a.sync();assert.match(a.overlay(),/Log first contact/);
  act(a,'activity','lead','L104');a.submit('sales-activity-form',{type:'Call',note:'Customer confirmed their budget and business need.'});a.sync();assert.match(a.overlay(),/Request qualification/);
  act(a,'activity','lead','L104');a.element('activity-type-select').value='Follow-up';a.element('activity-type-select').onchange();assert.equal(a.element('follow-up-field').hidden,false);a.submit('sales-activity-form',{type:'Follow-up',note:'Send the proposed scope.',dueDate:'2026-10-20'});a.sync();assert.match(a.overlay(),/Due Oct 20/);const aid=a.run("getRecord('lead','L104').activities.at(-1).id");act(a,'complete','lead','L104',{activityId:aid});a.sync();assert.match(a.overlay(),/Follow-up · Completed/);
  act(a,'qualify','lead','L104');a.sync();assert.match(a.overlay(),/Qualification requested/);act(a,'refresh');a.sync();act(a,'register-linked','lead','L104');a.submit('sales-record-form',registration);const d=a.run('detailRecord.id');act(a,'submit-deal','deal',d);a.sync();act(a,'stage','deal',d);a.submit('sales-stage-form',{stage:'Lost',reason:'Customer selected an alternative provider.',lostReason:'Competitor'});a.sync();assert.equal(a.run(`getRecord('deal','${d}').stage`),'Lost');assert.match(a.overlay(),/Customer selected an alternative/);
@@ -85,7 +85,7 @@ test('one sidebar Leads entry keeps all sales tabs accessible and highlights the
 });
 
 test('Draft column displays two cards and View all drafts exposes the complete list',()=>{
- const a=environment();a.login();a.run("for(let i=0;i<4;i++)workflow.createLead({company:'Draft company '+i})");a.click({page:'leads'});const draftColumn=a.html().match(/<section class="lead-column"[\s\S]*?<\/section>/)[0];assert.equal((draftColumn.match(/class="card lead-card sales-card"/g)||[]).length,2);assert.match(draftColumn,/Showing 2 of 5 drafts/);act(a,'all-drafts');assert.equal(a.run('salesView'),'list');assert.equal(a.run('salesFilter'),'Draft');assert.match(a.html(),/5 of 6 records/);assert.match(a.html(),/Cedar Analytics/);for(let i=0;i<4;i++)assert.match(a.html(),new RegExp('Draft company '+i));
+ const a=environment();a.login();a.run("for(let i=0;i<4;i++)workflow.createLead({company:'Draft company '+i})");a.click({page:'leads'});const draftColumn=a.html().match(/<section class="lead-column"[\s\S]*?<\/section>/)[0];assert.equal((draftColumn.match(/class="card lead-card sales-card"/g)||[]).length,2);assert.match(draftColumn,/Showing 2 of 5 new records/);act(a,'all-drafts');assert.equal(a.run('salesView'),'list');assert.equal(a.run('salesFilter'),'Draft');assert.match(a.html(),/5 of 6 records/);assert.match(a.html(),/Cedar Analytics/);for(let i=0;i<4;i++)assert.match(a.html(),new RegExp('Draft company '+i));
 });
 
 test('Connect later skips Salesforce without blocking program and dashboard access',()=>{

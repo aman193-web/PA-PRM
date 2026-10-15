@@ -18,7 +18,7 @@ test('qualified lead form visibly locks customer identity and leaves contact fie
 test('linked leads have a deal-specific next action and no edit or activity controls',()=>{
  const a=environment();a.login();a.run(`workflow.createDeal(${JSON.stringify({...registration,consent:true,confirmedNeed:true})},'L103')`);const id=a.run("getRecord('lead','L103').dealId");
  a.run("getRecord('lead','L103').activities.push({id:'fixture-follow-up',type:'Follow-up',note:'Customer discussion',dueDate:'2026-10-20',completed:false,time:'2026-10-14T12:00:00Z'})");act(a,'open','lead','L103');
- assert.match(a.overlay(),/View deal · Draft/);assert.match(a.overlay(),new RegExp('Deal '+id+' · Registration Draft · Opportunity Not created'));assert.doesNotMatch(a.overlay(),/data-sales-action="(?:edit|activity|complete|close-lead)"/);assert.match(a.overlay(),/Refresh Salesforce/);
+ assert.match(a.overlay(),/View deal · New/);assert.match(a.overlay(),new RegExp('Deal '+id+' · Registration New · Opportunity Not created'));assert.doesNotMatch(a.overlay(),/data-sales-action="(?:edit|activity|complete|close-lead)"/);assert.match(a.overlay(),/Refresh Salesforce/);
  act(a,'linked','lead','L103');act(a,'edit','deal',id);assert.match(a.overlay(),/name="company"[^>]*readonly/);
 });
 
