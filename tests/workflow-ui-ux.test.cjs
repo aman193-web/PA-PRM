@@ -71,3 +71,18 @@ test('Save & submit preserves a failed registration draft and Cancel leaves it a
  const a=environment();a.login();const before=a.run("workflow.list('deal').length");act(a,'new-deal');submit(a,'sales-record-form',{...registration,confirmedNeed:undefined},'submit');assert.match(a.overlay(),/sales-record-form/);assert.match(a.element('sales-form-error').textContent,/customer need/);assert.equal(a.run("workflow.list('deal').length"),before+1);a.click({action:'close'});assert.equal(a.overlay(),'');const id=a.run("workflow.list('deal').find(r=>r.company==='Workflow UX Customer').id");assert.equal(a.run(`getRecord('deal','${id}').registration`),'Draft');
  act(a,'new-deal');submit(a,'sales-record-form',{...registration,company:'A second customer',email:'second@example.com',confirmedNeed:undefined},'submit');submit(a,'sales-record-form',{...registration,company:'A second customer',email:'second@example.com'},'submit');assert.equal(a.run("workflow.list('deal').length"),before+2);a.sync();assert.equal(a.run("workflow.list('deal').find(r=>r.company==='A second customer').registration"),'Approved');
 });
+
+
+test('Submitted and Disqualified boards show one card while View all retains every record',()=>{
+ for(const status of ['Submitted','Disqualified']){
+  const a=environment();a.login();
+  a.run(`for(let i=0;i<3;i++){const r=workflow.createLead({company:'Limited '+i});r.status='${status}';}`);
+  a.click({page:'leads'});
+  const column=[...a.html().matchAll(/<section class="lead-column"[\s\S]*?<\/section>/g)].map(m=>m[0]).find(html=>html.includes('<h2>'+status+'</h2>'));
+  assert.equal((column.match(/class="card lead-card sales-card"/g)||[]).length,1);
+  assert.match(column,/Showing 1 of 3 records/);
+  a.click({salesAction:'all-status',salesStatus:status});
+  assert.equal(a.run('salesView'),'list');assert.equal(a.run('salesFilter'),status);
+  for(let i=0;i<3;i++)assert.match(a.html(),new RegExp('Limited '+i));
+ }
+});
