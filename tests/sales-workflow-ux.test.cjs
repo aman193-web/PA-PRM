@@ -145,3 +145,15 @@ test('Submitted sample is present and restored once for previously compacted bro
  e.f.sync();assert.equal(e.f.get('lead','L102').status,'Qualified');
  W.initialize(e.state);assert.equal(e.f.get('lead','L102').status,'Qualified');assert.equal(e.s.leads.filter(r=>r.id==='L102').length,1);
 });
+
+test('New sample cards populate an empty saved column once without resetting other leads',()=>{
+ const e=env();assert.equal(e.f.list('lead').filter(r=>r.origin==='partner'&&r.status==='Draft').length,2);
+ e.s.leads=e.s.leads.filter(r=>r.status!=='Draft');delete e.s.newSamplesVersion;
+ const qualified=JSON.stringify(e.f.get('lead','L103'));
+ W.initialize(e.state);
+ const cards=e.f.list('lead').filter(r=>r.origin==='partner'&&r.status==='Draft');
+ assert.equal(cards.length,2);assert.ok(cards.every(r=>r.sync.status==='local'&&r.crmId===null));
+ assert.equal(JSON.stringify(e.f.get('lead','L103')),qualified);
+ e.f.deleteDraft('lead',cards[0].id);W.initialize(e.state);
+ assert.equal(e.f.list('lead').filter(r=>r.origin==='partner'&&r.status==='Draft').length,1);
+});

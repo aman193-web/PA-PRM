@@ -30,7 +30,7 @@ Never-submitted drafts can be deleted with confirmation. Submitted or accepted l
 
 Qualification, registration approval, and winning an opportunity are distinct. Leads never become Won directly. The lead retains its qualification status and links to the separate registration and opportunity.
 
-Five starter leads are shown: three partner-created (New, Submitted, and Qualified) and two CRM-assigned. Redundant untouched examples are retired once. User-created or edited records are retained. Earlier portal data is preserved in `sales.legacyArchive`; imported leads start as drafts because old preview statuses do not establish real CRM qualification or approval.
+Six starter leads are shown: four partner-created (two New, one Submitted, and one Qualified) and two CRM-assigned. Redundant untouched examples are retired once. User-created or edited records are retained. Earlier portal data is preserved in `sales.legacyArchive`; imported leads start as drafts because old preview statuses do not establish real CRM qualification or approval.
 
 ## Salesforce simulation
 
@@ -52,7 +52,7 @@ Data persists in browser localStorage under `minute-v1`. Deploying the static ap
 
 The existing PRM blue/orange palette, compact Tabler components, light sidebar, welcome animation, and centered onboarding remain. Every refresh starts at welcome, then optional Salesforce connection and the read-only program overview. Connect later skips the connection and unlocks the dashboard. Partners can connect from Salesforce updates later; submitted updates remain queued until then. Demo passwords are never stored or sent.
 
-Portal screens share one heading component and spacing tokens. The sidebar has one Leads entry. My Leads, CRM Assigned Leads, and My Deals are tabs inside the sales workspace. Flow and list views share category, search, and status filters. New, Submitted, and Disqualified lead columns display at most one card each; View all opens the complete filtered list. New registration columns display at most two cards. Details show origin, destination, next action, canonical customer data, activities, follow-ups, and timestamped history. Dashboard totals, notifications, search, and CSV export use the same authorized records. Salesforce updates is a partner status/activity view with retry controls, not CRM configuration. Vendor administration and team-management controls are absent; company/program information is view-only.
+Portal screens share one heading component and spacing tokens. The sidebar has one Leads entry. My Leads, CRM Assigned Leads, and My Deals are tabs inside the sales workspace. Flow and list views share category, search, and status filters. New lead columns display two cards; Submitted and Disqualified columns display at most one card each; View all opens the complete filtered list. New registration columns display at most two cards. Details show origin, destination, next action, canonical customer data, activities, follow-ups, and timestamped history. Dashboard totals, notifications, search, and CSV export use the same authorized records. Salesforce updates is a partner status/activity view with retry controls, not CRM configuration. Vendor administration and team-management controls are absent; company/program information is view-only.
 
 Keyboard shortcuts: Command/Ctrl+K for search and Command/Ctrl+J for quick actions. Tables sort by column; boards and tables scroll horizontally on smaller screens. Forms have validation, errors, cancel actions, and saved-update feedback. Reduced-motion preferences are respected.
 

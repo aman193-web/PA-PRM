@@ -38,6 +38,17 @@ function restoreSubmittedSample(state){
  }
  s.submittedSampleVersion=1;
 }
+// Populate New once, preserving existing partner drafts and later workflow progress.
+function addNewSamples(state){
+ const s=state.sales;if(s.newSamplesVersion===1)return;
+ let count=s.leads.filter(r=>r.partnerId===s.partnerId&&r.origin==='partner'&&r.status==='Draft').length;
+ const now=new Date().toISOString(),examples=[['L108','Solstice Data','Maya Patel',62000],['L109','Lumen Works','Daniel Park',48000]];
+ for(const [id,company,contact,value]of examples){
+  if(count>=2)break;if(s.leads.some(r=>r.id===id))continue;
+  s.leads.push({id,partnerId:s.partnerId,company,contact,email:contact.toLowerCase().replace(/\s+/g,'.')+'@'+company.toLowerCase().replace(/\s+/g,'')+'.example',jobTitle:'Director, Operations',origin:'partner',status:'Draft',value,source:'Partner referral',receivedFrom:'Partner referral',region:'North America',need:'Bring regional customer data and sales reporting into one shared workspace.',consent:true,createdAt:now,updatedAt:now,crmId:null,nextStep:'',activities:[],history:[{time:now,title:'Lead created',detail:'Customer details are ready to review and submit.',actor:'Partner'}],sync:{status:'local'},sample:true});count++;
+ }
+ s.newSamplesVersion=1;
+}
 // Replace retired demo-company references in saved records without resetting their journey.
 function replaceRetiredCompany(state){
  const retired=/\bred[\s-]*blink(?:[\s-]*technolog(?:y|ies))?\b/i,affected=new Set();
@@ -61,7 +72,7 @@ function replaceRetiredCompany(state){
 }
 function initialize(state,{migrate=false}={}){
  replaceRetiredCompany(state);
- if(state.sales?.version===1){compactSamples(state);restoreSubmittedSample(state);return;}
+ if(state.sales?.version===1){compactSamples(state);restoreSubmittedSample(state);addNewSamples(state);return;}
  const now=new Date().toISOString();
  const old=copy({leads:state.leads||[],deals:state.deals||[],activity:state.activity||[]});
  state.sales={version:1,partnerId:'partner-acme',sequence:1000,leads:[],deals:[],outbox:[],notifications:[],lastSync:null,failNext:false,crm:{leads:{},registrations:{},opportunities:{},processed:{},jobs:[],tick:0}};
@@ -99,7 +110,7 @@ function initialize(state,{migrate=false}={}){
  if(migrate)old.leads.filter(l=>!l.isSample).forEach((l,i)=>{
   const imported={...copy(a),id:'L-import-'+i,company:l.company||'Imported lead',contact:l.contact||'',email:l.email||'',jobTitle:l.jobTitle||'',source:l.source||'Previous portal',receivedFrom:l.receivedFrom||l.source||'Previous portal',value:Number(l.value)||0,need:l.opportunity||l.nextStep||'',consent:false,status:'Draft',crmId:null,sample:false,legacyStatus:l.status,legacyHistory:l.history||[],history:[{time:now,title:'Imported draft',detail:'Previous preview data preserved. Confirm customer details before submitting to Salesforce.',actor:'System'}]};s.leads.push(imported);
  });
- compactSamples(state);restoreSubmittedSample(state);
+ compactSamples(state);restoreSubmittedSample(state);addNewSamples(state);
  s.notifications.push({id:'N100',partnerId:s.partnerId,type:'lead',recordId:d.id,title:'New CRM lead assigned',detail:'Harbor Systems is ready for you to accept.',time:now,read:false});
 }
 function create(state,options={}){

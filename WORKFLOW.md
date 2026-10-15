@@ -11,7 +11,7 @@
 | Free stage controls could imply vendor approval | No partner approval controls; review decisions come from mock vendor processing |
 | Activity and notifications did not explain next actions | Record actions follow confirmed state; notes/follow-ups, history, notifications, and dashboard all use the same records |
 | Partner view contained team administration | Program/company data is view-only; no vendor admin or team-management actions |
-| Excess sample records crowded the board | Five initial leads, including one Submitted example; created/edited records preserved |
+| Excess sample records crowded the board | Six initial leads, including two New and one Submitted example; created/edited records preserved |
 
 ## Partner-created lead to Won
 
@@ -61,6 +61,6 @@ All customers and Salesforce decisions are simulated. The hosted application sti
 
 Automated verification covers the existing journeys plus the close/withdraw, identity lock, resubmission, outcome validation, concurrency, and form-recovery paths. Both complete journeys are exercised through the same handlers used by the interface. Browser visual QA remains unavailable in this session. Existing tests that contradicted the new required outcome fields, forward-stage rules, or next-step copy were updated with user approval.
 
-The final sidebar contains one Leads entry. Assigned leads and deals remain available through workspace tabs. New lead columns show one card; New registration columns show two. Submitted and Disqualified lead columns show one card each. View all shows every retained record in list view. Welcome and onboarding were preserved unchanged during the partner-only and navigation refinements.
+The final sidebar contains one Leads entry. Assigned leads and deals remain available through workspace tabs. New lead columns show two cards; New registration columns show two. Submitted and Disqualified lead columns show one card each. View all shows every retained record in list view. Welcome and onboarding were preserved unchanged during the partner-only and navigation refinements.
 
 Salesforce setup is optional: Connect later opens the program step and dashboard without marking the CRM connected. Submitted requests stay queued. Salesforce updates → Connect Salesforce opens the same confirmation flow in the portal and synchronizes saved requests after confirmation.

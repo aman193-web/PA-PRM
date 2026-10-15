@@ -34,7 +34,7 @@ test('assigned lead UI accepts, logs contact and follow-up, qualifies, registers
 });
 
 test('board/list, search, filters and category navigation use the same scoped records',()=>{
- const a=environment();a.login();a.click({page:'leads'});assert.equal(a.run('scopedRecords().length'),3);assert.match(a.html(),/sales-board/);a.click({salesView:'list'});assert.match(a.html(),/data-table/);a.element('sales-search').oninput({target:{value:'Beacon',selectionStart:6}});assert.match(a.html(),/1 of 3 records/);assert.doesNotMatch(a.html(),/Cedar Analytics/);a.element('sales-filter').onchange({target:{value:'Draft'}});assert.match(a.html(),/No matching records/);
+ const a=environment();a.login();a.click({page:'leads'});assert.equal(a.run('scopedRecords().length'),4);assert.match(a.html(),/sales-board/);a.click({salesView:'list'});assert.match(a.html(),/data-table/);a.element('sales-search').oninput({target:{value:'Beacon',selectionStart:6}});assert.match(a.html(),/1 of 4 records/);assert.doesNotMatch(a.html(),/Cedar Analytics/);a.element('sales-filter').onchange({target:{value:'Draft'}});assert.match(a.html(),/No matching records/);
  a.click({page:'assigned'});assert.match(a.html(),/Harbor Systems/);assert.doesNotMatch(a.html(),/Beacon Medical/);assert.equal(a.run('salesQuery'),'');const b=environment(a.saved());b.login();assert.equal(b.run('salesView'),'list');
 });
 
@@ -84,8 +84,8 @@ test('one sidebar Leads entry keeps all sales tabs accessible and highlights the
  const a=environment();a.login();for(const route of ['leads','assigned','deals']){a.click({page:route});const sidebar=a.html().match(/<aside class="sidebar[\s\S]*?<\/aside>/)[0];assert.doesNotMatch(sidebar,/data-page="assigned"|data-page="deals"/);assert.match(sidebar,/data-page="leads"[^>]+class="active"/);assert.match(a.html(),/sales-category-tabs/);assert.match(a.html(),/data-page="assigned"/);assert.match(a.html(),/data-page="deals"/)}
 });
 
-test('New column displays one card and View all exposes the complete list',()=>{
- const a=environment();a.login();a.run("for(let i=0;i<4;i++)workflow.createLead({company:'Draft company '+i})");a.click({page:'leads'});const draftColumn=a.html().match(/<section class="lead-column"[\s\S]*?<\/section>/)[0];assert.equal((draftColumn.match(/class="card lead-card sales-card"/g)||[]).length,1);assert.match(draftColumn,/Showing 1 of 5 new records/);act(a,'all-drafts');assert.equal(a.run('salesView'),'list');assert.equal(a.run('salesFilter'),'Draft');assert.match(a.html(),/5 of 7 records/);assert.match(a.html(),/Cedar Analytics/);for(let i=0;i<4;i++)assert.match(a.html(),new RegExp('Draft company '+i));
+test('New column displays two cards and View all exposes the complete list',()=>{
+ const a=environment();a.login();a.run("for(let i=0;i<4;i++)workflow.createLead({company:'Draft company '+i})");a.click({page:'leads'});const draftColumn=a.html().match(/<section class="lead-column"[\s\S]*?<\/section>/)[0];assert.equal((draftColumn.match(/class="card lead-card sales-card"/g)||[]).length,2);assert.match(draftColumn,/Showing 2 of 6 new records/);act(a,'all-drafts');assert.equal(a.run('salesView'),'list');assert.equal(a.run('salesFilter'),'Draft');assert.match(a.html(),/6 of 8 records/);assert.match(a.html(),/Cedar Analytics/);for(let i=0;i<4;i++)assert.match(a.html(),new RegExp('Draft company '+i));
 });
 
 test('Connect later skips Salesforce without blocking program and dashboard access',()=>{
