@@ -27,7 +27,29 @@ function compactSamples(state){
  s.crm.jobs=s.crm.jobs.filter(j=>s.crm.leads[j.crmId]||s.crm.registrations[j.crmId]);
  s.compactSamplesVersion=1;
 }
+// Replace retired demo-company references in saved records without resetting their journey.
+function replaceRetiredCompany(state){
+ const retired=/\bred[\s-]*blink(?:[\s-]*technolog(?:y|ies))?\b/i,affected=new Set();
+ const matches=value=>typeof (value.company||value.name)==='string'&&retired.test(value.company||value.name);
+ function collect(value){if(!value||typeof value!=='object')return;if(matches(value)&&value.id)affected.add(value.id);for(const item of Object.values(value))if(item&&typeof item==='object')collect(item);}
+ function replace(value,inherited=false){
+  if(!value||typeof value!=='object')return;
+  const related=inherited||matches(value)||affected.has(value.id)||affected.has(value.recordId);
+  if(related){
+   if(Object.hasOwn(value,'contact'))value.contact='Jordan Ellis';
+   if(Object.hasOwn(value,'email'))value.email='jordan.ellis@willowbrook.example';
+   if(Object.hasOwn(value,'jobTitle'))value.jobTitle='Director, Operations';
+  }
+  for(const [field,item]of Object.entries(value)){
+   if(/^(?:id|.*Id)$/.test(field))continue;
+   if(typeof item==='string')value[field]=item.replace(/\b(?:www\.)?redblink[a-z0-9-]*\.[a-z.]+\b/gi,'willowbrook.example').replace(/\bred[\s-]*blink(?:[\s-]*technolog(?:y|ies))?\b/gi,'Willowbrook Systems');
+   else replace(item,related);
+  }
+ }
+ collect(state);replace(state);
+}
 function initialize(state,{migrate=false}={}){
+ replaceRetiredCompany(state);
  if(state.sales?.version===1){compactSamples(state);return;}
  const now=new Date().toISOString();
  const old=copy({leads:state.leads||[],deals:state.deals||[],activity:state.activity||[]});

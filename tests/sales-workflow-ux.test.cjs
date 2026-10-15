@@ -111,3 +111,24 @@ test('resubmission and outcome updates survive reload and failure with a single 
  const e=env(),l=leadAt(e,'Needs information');e.f.resubmit(l.id,{need:'Customer needs a unified workspace for sixty sales representatives.'});e.f.failNext();e.f.sync();assert.equal(l.status,'Needs information');const restored=env(clone(e.state));restored.f.sync();const lead=restored.f.get('lead',l.id);assert.equal(lead.status,'Submitted');assert.equal(restored.crm.jobs.filter(j=>j.crmId===lead.crmId).length,1);restored.f.sync();assert.equal(lead.status,'Qualified');
  const d=dealAt(restored);restored.f.updateStage(d.id,'Won','Signed a confirmed annual customer contract.',{wonAmount:99000,closeDate:'2026-10-15'});restored.f.failNext();restored.f.sync();assert.equal(d.value,82000);const again=env(clone(restored.state));again.f.sync();again.f.sync();const won=again.f.get('deal',d.id);assert.equal(won.value,99000);assert.equal(won.estimatedValue,82000);assert.equal(again.s.outbox.filter(o=>o.recordId===d.id&&o.action==='stage').length,1);
 });
+
+
+test('retired company data is replaced across saved records without resetting workflows',()=>{
+ const state={crm:{connected:true}};W.initialize(state);
+ const lead=state.sales.leads.find(r=>r.id==='L103');
+ Object.assign(lead,{company:'Redblink Technology',contact:'Former contact',email:'contact@redblink.com',jobTitle:'Former title'});
+ state.sales.crm.leads[lead.crmId]=structuredClone(lead);
+ state.sales.notifications.push({id:'notice-retired',detail:'Redblink Technologies sent a lead.'});
+ state.sales.outbox.push({id:'operation-retired',recordId:lead.id,payload:{company:'Redblink Technology',contact:'Former contact'},baseline:{company:'Redblink Technology',contact:'Former contact'}});
+ const untouched=JSON.stringify(state.sales.leads.find(r=>r.id==='L104'));
+ W.initialize(state);
+ assert.equal(lead.company,'Willowbrook Systems');assert.equal(lead.contact,'Jordan Ellis');assert.equal(lead.email,'jordan.ellis@willowbrook.example');
+ assert.equal(lead.status,'Qualified');assert.equal(lead.id,'L103');assert.equal(state.sales.version,1);
+ assert.equal(state.sales.crm.leads[lead.crmId].company,lead.company);
+ assert.equal(state.sales.outbox.at(-1).payload.company,lead.company);
+ assert.equal(state.sales.outbox.at(-1).baseline.company,lead.company);
+ assert.equal(state.sales.outbox.at(-1).baseline.contact,lead.contact);
+ assert.doesNotMatch(JSON.stringify(state),/redblink/i);
+ assert.equal(JSON.stringify(state.sales.leads.find(r=>r.id==='L104')),untouched);
+ const once=JSON.stringify(state);W.initialize(state);assert.equal(JSON.stringify(state),once);
+});
