@@ -17,7 +17,7 @@ class WorkflowError extends Error { constructor(message,code='VALIDATION'){super
 function compactSamples(state){
  const s=state.sales;if(s.compactSamplesVersion===1)return;
  const linked=s.deals.find(d=>d.id==='D101');
- const candidates=['L102','L107',...(!linked||linked.sample&&linked.history.length===1?['L106']:[])];
+ const candidates=['L107',...(!linked||linked.sample&&linked.history.length===1?['L106']:[])];
  const retired=s.leads.filter(r=>candidates.includes(r.id)&&r.sample&&r.history.length===1);
  const retireDeal=retired.some(r=>r.id==='L106')&&linked;
  s.retiredSamples=[...retired,...(retireDeal?[linked]:[])];
@@ -26,6 +26,17 @@ function compactSamples(state){
  if(retireDeal){s.deals=s.deals.filter(r=>r!==linked);delete s.crm.registrations[linked.crmId];delete s.crm.opportunities[linked.opportunityId];}
  s.crm.jobs=s.crm.jobs.filter(j=>s.crm.leads[j.crmId]||s.crm.registrations[j.crmId]);
  s.compactSamplesVersion=1;
+}
+// Restore the Submitted example once for browsers that previously retired it.
+function restoreSubmittedSample(state){
+ const s=state.sales;if(s.submittedSampleVersion===1)return;
+ const sample=(s.retiredSamples||[]).find(r=>r.id==='L102'&&r.sample&&r.status==='Submitted'&&r.partnerId===s.partnerId);
+ if(sample&&!s.leads.some(r=>r.id===sample.id)&&!s.leads.some(r=>r.partnerId===s.partnerId&&r.origin==='partner'&&r.status==='Submitted')){
+  s.leads.push(copy(sample));s.crm.leads[sample.crmId]=copy(sample);
+  s.retiredSamples=s.retiredSamples.filter(r=>r!==sample);
+  if(!s.crm.jobs.some(j=>j.kind==='qualify'&&j.crmId===sample.crmId))s.crm.jobs.push({kind:'qualify',crmId:sample.crmId,due:s.crm.tick+1});
+ }
+ s.submittedSampleVersion=1;
 }
 // Replace retired demo-company references in saved records without resetting their journey.
 function replaceRetiredCompany(state){
@@ -50,7 +61,7 @@ function replaceRetiredCompany(state){
 }
 function initialize(state,{migrate=false}={}){
  replaceRetiredCompany(state);
- if(state.sales?.version===1){compactSamples(state);return;}
+ if(state.sales?.version===1){compactSamples(state);restoreSubmittedSample(state);return;}
  const now=new Date().toISOString();
  const old=copy({leads:state.leads||[],deals:state.deals||[],activity:state.activity||[]});
  state.sales={version:1,partnerId:'partner-acme',sequence:1000,leads:[],deals:[],outbox:[],notifications:[],lastSync:null,failNext:false,crm:{leads:{},registrations:{},opportunities:{},processed:{},jobs:[],tick:0}};
@@ -88,7 +99,7 @@ function initialize(state,{migrate=false}={}){
  if(migrate)old.leads.filter(l=>!l.isSample).forEach((l,i)=>{
   const imported={...copy(a),id:'L-import-'+i,company:l.company||'Imported lead',contact:l.contact||'',email:l.email||'',jobTitle:l.jobTitle||'',source:l.source||'Previous portal',receivedFrom:l.receivedFrom||l.source||'Previous portal',value:Number(l.value)||0,need:l.opportunity||l.nextStep||'',consent:false,status:'Draft',crmId:null,sample:false,legacyStatus:l.status,legacyHistory:l.history||[],history:[{time:now,title:'Imported draft',detail:'Previous preview data preserved. Confirm customer details before submitting to Salesforce.',actor:'System'}]};s.leads.push(imported);
  });
- compactSamples(state);
+ compactSamples(state);restoreSubmittedSample(state);
  s.notifications.push({id:'N100',partnerId:s.partnerId,type:'lead',recordId:d.id,title:'New CRM lead assigned',detail:'Harbor Systems is ready for you to accept.',time:now,read:false});
 }
 function create(state,options={}){

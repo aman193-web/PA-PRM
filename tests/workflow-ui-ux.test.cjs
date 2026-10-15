@@ -80,7 +80,7 @@ test('Submitted and Disqualified boards show one card while View all retains eve
   a.click({page:'leads'});
   const column=[...a.html().matchAll(/<section class="lead-column"[\s\S]*?<\/section>/g)].map(m=>m[0]).find(html=>html.includes('<h2>'+status+'</h2>'));
   assert.equal((column.match(/class="card lead-card sales-card"/g)||[]).length,1);
-  assert.match(column,/Showing 1 of 3 records/);
+  assert.match(column,new RegExp('Showing 1 of '+(status==='Submitted'?4:3)+' records'));
   a.click({salesAction:'all-status',salesStatus:status});
   assert.equal(a.run('salesView'),'list');assert.equal(a.run('salesFilter'),status);
   for(let i=0;i<3;i++)assert.match(a.html(),new RegExp('Limited '+i));

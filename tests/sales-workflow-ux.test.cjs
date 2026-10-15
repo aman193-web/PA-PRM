@@ -132,3 +132,16 @@ test('retired company data is replaced across saved records without resetting wo
  assert.equal(JSON.stringify(state.sales.leads.find(r=>r.id==='L104')),untouched);
  const once=JSON.stringify(state);W.initialize(state);assert.equal(JSON.stringify(state),once);
 });
+
+test('Submitted sample is present and restored once for previously compacted browser data',()=>{
+ const e=env(),sample=e.f.get('lead','L102');
+ assert.equal(e.f.list('lead').filter(r=>r.origin==='partner'&&r.status==='Submitted').length,1);
+ e.s.leads=e.s.leads.filter(r=>r.id!==sample.id);e.s.retiredSamples.push(clone(sample));
+ delete e.crm.leads[sample.crmId];e.crm.jobs=e.crm.jobs.filter(j=>j.crmId!==sample.crmId);delete e.s.submittedSampleVersion;
+ const other=JSON.stringify(e.f.get('lead','L103'));
+ W.initialize(e.state);assert.equal(e.f.get('lead','L102').status,'Submitted');assert.equal(e.crm.leads[sample.crmId].status,'Submitted');
+ assert.equal(JSON.stringify(e.f.get('lead','L103')),other);
+ assert.equal(e.crm.jobs.filter(j=>j.crmId===sample.crmId).length,1);
+ e.f.sync();assert.equal(e.f.get('lead','L102').status,'Qualified');
+ W.initialize(e.state);assert.equal(e.f.get('lead','L102').status,'Qualified');assert.equal(e.s.leads.filter(r=>r.id==='L102').length,1);
+});
