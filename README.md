@@ -16,6 +16,10 @@ Push to `main` to run the workflow checks and publish `dist/` using GitHub Actio
 
 This is a public static demo when hosted with GitHub Pages. Sign-in and Salesforce are simulations; use fictional customer data only. Business records stay in each browser's localStorage and are not uploaded with source or shared across devices.
 
+## Vercel deployment
+
+Import this repository with Root Directory set to the repository root (`.`). The committed `vercel.json` selects Other, skips installation/build, and serves `dist/`. Redeploy the latest commit after changing settings. Routing uses URL fragments, so no catch-all rewrite is required.
+
 ## Connected sales journeys
 
 - **My Leads:** create a draft, review customer details and consent, then submit to vendor Salesforce. Submission and qualification are separate states. Vendor review can qualify, request more information, or disqualify a lead.
