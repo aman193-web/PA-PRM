@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const W=require('../dist/sales-workflow.js');
 const fixed='2026-10-15T12:00:00.000Z';
 const clone=value=>JSON.parse(JSON.stringify(value));
-function env(saved){const state=saved||{crm:{connected:true}};W.initialize(state);return {state,s:state.sales,crm:state.sales.crm,f:W.create(state,{now:()=>fixed})};}
+function env(saved){const state=saved||{crm:{connected:true}};W.initialize(state);if(!saved)state.sales.crm.reviewMode='auto';return {state,s:state.sales,crm:state.sales.crm,f:W.create(state,{now:()=>fixed})};}
 const values=(company='Workflow customer')=>({company,contact:'Taylor Reed',email:'taylor@example.com',jobTitle:'Director',region:'North America',value:82000,need:'Consolidate customer sales reporting across regional offices.',consent:true,source:'Customer referral'});
 const dealValues=company=>({...values(company),name:'Regional rollout',product:'Sales Cloud',expectedClose:'2026-12-20',confirmedNeed:true});
 function leadAt(e,status,origin='partner'){const l=e.f.createLead(values(status+' '+origin));Object.assign(l,{status,origin,crmId:'00Q-'+l.id,sync:{status:'synced'}});e.crm.leads[l.crmId]=clone(l);return l;}
@@ -39,15 +39,15 @@ test('deleteDraft removes only local never-submitted drafts and clears linked po
 });
 
 test('every allowed origin/status can close and stays closed through delayed vendor jobs',()=>{
- for(const [origin,statuses] of [['partner',['Submitted','Needs information','Qualified']],['crm',['Accepted','Contacted','Qualification requested','Needs information','Qualified']]])for(const status of statuses){
-  const e=env(),l=leadAt(e,status,origin);e.f.closeLead(l.id,'No budget','Customer postponed their budget.');assert.equal(l.status,status);assert.equal(e.s.outbox.at(-1).action,'close');e.f.sync();assert.equal(l.status,'Closed');assert.equal(l.closeReason,'No budget');assert.match(l.reviewReason,/postponed/);
+ for(const [origin,statuses] of [['partner',['Submitted','Needs information','Approved','Working','Qualified']],['crm',['Accepted','Working','Qualified']]])for(const status of statuses){
+  const e=env(),l=leadAt(e,status,origin);e.f.closeLead(l.id,'No budget','Customer postponed their budget.');assert.equal(l.status,status);assert.equal(e.s.outbox.at(-1).action,'close');e.f.sync();assert.equal(l.status,'Closed');assert.equal(l.closedFrom,status);assert.equal(l.closeReason,'No budget');assert.match(l.reviewReason,/postponed/);
   e.crm.jobs.push({kind:'qualify',crmId:l.crmId,due:e.crm.tick+1});e.f.sync();assert.equal(l.status,'Closed');assert.equal(e.crm.leads[l.crmId].status,'Closed');assert.equal(e.f.permissions('lead',l.id).canActivity,false);
   assert.throws(()=>e.f.edit('lead',l.id,{contact:'Changed'}),/cannot be edited/);assert.throws(()=>e.f.addActivity('lead',l.id,{type:'Call',note:'Customer call'}),/read-only/);
  }
 });
 
 test('close rejects invalid states, reasons, notes, and active linked registrations',()=>{
- const e=env();for(const status of ['Draft','Assigned','Declined','Disqualified','Closed']){const l=leadAt(e,status,status==='Assigned'?'crm':'partner');assert.throws(()=>e.f.closeLead(l.id,'Other','Closing the customer lead.'),/cannot be closed/);}
+ const e=env();for(const status of ['Draft','Assigned','Declined','Rejected','Closed']){const l=leadAt(e,status,status==='Assigned'?'crm':'partner');assert.throws(()=>e.f.closeLead(l.id,'Other','Closing the customer lead.'),/cannot be closed/);}
  const l=e.f.get('lead','L103');assert.throws(()=>e.f.closeLead(l.id,'Invalid','A valid note'),/Select a reason/);assert.throws(()=>e.f.closeLead(l.id,'Other','No'),/5 characters/);e.f.createDeal(dealValues(),l.id);assert.throws(()=>e.f.closeLead(l.id,'Other','Closing this lead'),/active linked deal/);
 });
 
@@ -62,16 +62,18 @@ test('withdrawal loses safely to canonical approval with the exact conflict',()=
 });
 
 test('terminal changes arriving from CRM reject queued activity and completion',()=>{
- for(const action of ['activity','complete']){const e=env(),l=leadAt(e,'Contacted','crm');l.activities.push({id:'F1',type:'Follow-up',note:'Call customer',dueDate:'2026-10-20',completed:false});e.crm.leads[l.crmId]=clone(l);if(action==='activity')e.f.addActivity('lead',l.id,{type:'Note',note:'Preparing a customer summary'});else e.f.completeActivity('lead',l.id,'F1');e.crm.leads[l.crmId].status='Closed';assert.equal(e.f.sync().ok,false);assert.equal(e.crm.leads[l.crmId].activities.length,1);assert.equal(e.crm.leads[l.crmId].activities[0].completed,false);}
+ for(const action of ['activity','complete']){const e=env(),l=leadAt(e,'Working','crm');l.activities.push({id:'F1',type:'Follow-up',note:'Call customer',dueDate:'2026-10-20',completed:false});e.crm.leads[l.crmId]=clone(l);if(action==='activity')e.f.addActivity('lead',l.id,{type:'Note',note:'Preparing a customer summary'});else e.f.completeActivity('lead',l.id,'F1');e.crm.leads[l.crmId].status='Closed';assert.equal(e.f.sync().ok,false);assert.equal(e.crm.leads[l.crmId].activities.length,1);assert.equal(e.crm.leads[l.crmId].activities[0].completed,false);}
  const e=env(),d=dealAt(e);e.f.addActivity('deal',d.id,{type:'Note',note:'Preparing a customer summary'});e.crm.registrations[d.crmId].registration='Withdrawn';assert.equal(e.f.sync().ok,false);assert.equal(e.crm.opportunities[d.opportunityId].activities.length,0);
 });
 
-test('Accepted notes and follow-ups preserve acceptance while Call or Email records first contact',()=>{
- for(const type of ['Call','Email']){const e=env(),l=leadAt(e,'Accepted','crm');for(const activity of [{type:'Note',note:'Reviewing customer context'},{type:'Follow-up',note:'Call this customer tomorrow',dueDate:'2026-10-16'}]){e.f.addActivity('lead',l.id,activity);e.f.sync();assert.equal(l.status,'Accepted');}e.f.addActivity('lead',l.id,{type,note:'Customer confirmed the initial discussion'});e.f.sync();assert.equal(l.status,'Contacted');assert.equal(e.crm.leads[l.crmId].activities.at(-1).type,type);}
+test('notes and follow-ups keep Approved or Accepted while a call, email, or meeting starts Working',()=>{
+ for(const [origin,status]of [['crm','Accepted'],['partner','Approved']])for(const type of ['Call','Email','Meeting']){const e=env(),l=leadAt(e,status,origin);for(const activity of [{type:'Note',note:'Reviewing customer context'},{type:'Follow-up',note:'Call this customer tomorrow',dueDate:'2026-10-16'}]){e.f.addActivity('lead',l.id,activity);e.f.sync();assert.equal(l.status,status);}e.f.addActivity('lead',l.id,{type,outcome:'Connected',note:'Customer confirmed the initial discussion'});e.f.sync();assert.equal(l.status,'Working');assert.equal(l.workingAt,fixed);assert.equal(e.crm.leads[l.crmId].activities.at(-1).type,type);}
+ const e=env(),l=leadAt(e,'Working');assert.throws(()=>e.f.addActivity('lead',l.id,{type:'Call',outcome:'Maybe',note:'Customer call'}),/conversation/);
 });
 
 test('resubmit validates and sends changes plus review request in one durable operation',()=>{
- for(const origin of ['partner','crm']){const e=env(),l=leadAt(e,'Needs information',origin),before=e.s.outbox.length;e.f.resubmit(l.id,{need:'The customer needs centralized reporting for eight teams.',contact:'New contact'});assert.equal(e.s.outbox.length,before+1);assert.equal(e.s.outbox.at(-1).action,'resubmit');assert.notEqual(l.contact,'New contact');e.f.sync();assert.equal(l.status,origin==='partner'?'Submitted':'Qualification requested');assert.equal(l.contact,'New contact');assert.equal(e.crm.leads[l.crmId].need,l.need);assert.equal(e.crm.jobs.filter(j=>j.crmId===l.crmId).length,1);e.f.sync();assert.equal(l.status,'Qualified');}
+ {const e=env(),l=leadAt(e,'Needs information'),before=e.s.outbox.length;e.f.resubmit(l.id,{need:'The customer needs centralized reporting for eight teams.',contact:'New contact'});assert.equal(e.s.outbox.length,before+1);assert.equal(e.s.outbox.at(-1).action,'resubmit');assert.notEqual(l.contact,'New contact');e.f.sync();assert.equal(l.status,'Submitted');assert.equal(l.contact,'New contact');assert.equal(e.crm.leads[l.crmId].need,l.need);assert.equal(e.crm.jobs.filter(j=>j.crmId===l.crmId).length,1);e.f.sync();assert.equal(l.status,'Approved');}
+ {const e=env(),l=leadAt(e,'Needs information','crm');assert.throws(()=>e.f.resubmit(l.id),/Only a lead needing information/);}
  const e=env(),l=leadAt(e,'Needs information');assert.throws(()=>e.f.resubmit(l.id,{email:'bad'}),/valid customer email/);assert.equal(e.s.outbox.length,0);e.f.resubmit(l.id);e.f.sync();assert.equal(l.status,'Submitted');assert.throws(()=>e.f.resubmit(l.id),/Only a lead needing information/);
 });
 
@@ -108,7 +110,7 @@ test('a real pending registration can be withdrawn before its next scheduled ven
 });
 
 test('resubmission and outcome updates survive reload and failure with a single result',()=>{
- const e=env(),l=leadAt(e,'Needs information');e.f.resubmit(l.id,{need:'Customer needs a unified workspace for sixty sales representatives.'});e.f.failNext();e.f.sync();assert.equal(l.status,'Needs information');const restored=env(clone(e.state));restored.f.sync();const lead=restored.f.get('lead',l.id);assert.equal(lead.status,'Submitted');assert.equal(restored.crm.jobs.filter(j=>j.crmId===lead.crmId).length,1);restored.f.sync();assert.equal(lead.status,'Qualified');
+ const e=env(),l=leadAt(e,'Needs information');e.f.resubmit(l.id,{need:'Customer needs a unified workspace for sixty sales representatives.'});e.f.failNext();e.f.sync();assert.equal(l.status,'Needs information');const restored=env(clone(e.state));restored.f.sync();const lead=restored.f.get('lead',l.id);assert.equal(lead.status,'Submitted');assert.equal(restored.crm.jobs.filter(j=>j.crmId===lead.crmId).length,1);restored.f.sync();assert.equal(lead.status,'Approved');
  const d=dealAt(restored);restored.f.updateStage(d.id,'Won','Signed a confirmed annual customer contract.',{wonAmount:99000,closeDate:'2026-10-15'});restored.f.failNext();restored.f.sync();assert.equal(d.value,82000);const again=env(clone(restored.state));again.f.sync();again.f.sync();const won=again.f.get('deal',d.id);assert.equal(won.value,99000);assert.equal(won.estimatedValue,82000);assert.equal(again.s.outbox.filter(o=>o.recordId===d.id&&o.action==='stage').length,1);
 });
 
@@ -142,8 +144,8 @@ test('Submitted sample is present and restored once for previously compacted bro
  W.initialize(e.state);assert.equal(e.f.get('lead','L102').status,'Submitted');assert.equal(e.crm.leads[sample.crmId].status,'Submitted');
  assert.equal(JSON.stringify(e.f.get('lead','L103')),other);
  assert.equal(e.crm.jobs.filter(j=>j.crmId===sample.crmId).length,1);
- e.f.sync();assert.equal(e.f.get('lead','L102').status,'Qualified');
- W.initialize(e.state);assert.equal(e.f.get('lead','L102').status,'Qualified');assert.equal(e.s.leads.filter(r=>r.id==='L102').length,1);
+ e.f.sync();assert.equal(e.f.get('lead','L102').status,'Approved');
+ W.initialize(e.state);assert.equal(e.f.get('lead','L102').status,'Approved');assert.equal(e.s.leads.filter(r=>r.id==='L102').length,1);
 });
 
 test('New sample cards populate an empty saved column once without resetting other leads',()=>{

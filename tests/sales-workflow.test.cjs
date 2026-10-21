@@ -2,36 +2,41 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const W=require('../dist/sales-workflow.js');
 const fixed='2026-10-15T12:00:00.000Z';
-function env(saved){const state=saved||{crm:{connected:true}};W.initialize(state);const flow=W.create(state,{now:()=>fixed,authorized:()=>state.authorized!==false});return {state,flow,s:state.sales,crm:state.sales.crm};}
+// These journeys use automatic review by program rules; manual partner-manager review is covered in manager.test.cjs.
+function env(saved){const state=saved||{crm:{connected:true}};W.initialize(state);if(!saved)state.sales.crm.reviewMode='auto';const flow=W.create(state,{now:()=>fixed,authorized:()=>state.authorized!==false});return {state,flow,s:state.sales,crm:state.sales.crm};}
 const values=(company='Test Customer')=>({company,contact:'Taylor Reed',email:'taylor@example.com',value:82000,region:'North America',need:'Consolidate sales reporting across three regional offices.',consent:true,source:'Customer referral'});
 const dealValues=(company)=>({...values(company),name:'Regional sales rollout',product:'Sales Cloud',expectedClose:'2026-12-20',confirmedNeed:true});
+const bantValues={budgetConfirmed:true,decisionMaker:'Taylor Reed · Director',needConfirmed:true,timeline:'0–3 months'};
 function draftDeal(e,company){return e.flow.createDeal(dealValues(company));}
 function approvedDeal(e,company){const d=draftDeal(e,company);e.flow.submitDeal(d.id);e.flow.sync();return d;}
 
-test('partner-created lead → submission → vendor qualification → registration → opportunity → Won',()=>{
+test('partner-created lead → vendor approval → contact → BANT qualification → registration → opportunity → Won',()=>{
  const e=env(),f=e.flow,l=f.createLead(values());
  assert.equal(l.status,'Draft');assert.equal(l.crmId,null);
  f.submitLead(l.id);assert.equal(l.status,'Draft');assert.equal(l.sync.status,'pending');
  f.sync();assert.equal(l.status,'Submitted');assert.ok(e.crm.leads[l.crmId]);assert.equal(e.crm.leads[l.crmId].company,l.company);
- f.sync();assert.equal(l.status,'Qualified');assert.equal(l.dealId,undefined);
+ f.sync();assert.equal(l.status,'Approved');assert.equal(l.protectedUntil,'2027-01-13');assert.equal(l.dealId,undefined);assert.throws(()=>f.createDeal(dealValues(),l.id),/qualification/);
+ assert.throws(()=>f.qualify(l.id,bantValues),/Log a call/);
+ f.addActivity('lead',l.id,{type:'Meeting',outcome:'Connected',note:'Discovery meeting with the sales director.'});f.sync();assert.equal(l.status,'Working');
+ f.qualify(l.id,bantValues);assert.equal(l.status,'Working');f.sync();assert.equal(l.status,'Qualified');assert.equal(e.crm.leads[l.crmId].status,'Qualified');assert.equal(e.crm.leads[l.crmId].decisionMaker,bantValues.decisionMaker);
  const d=f.createDeal(dealValues(),l.id);assert.equal(d.registration,'Draft');assert.equal(l.dealId,d.id);assert.equal(d.leadId,l.id);
  f.submitDeal(d.id);f.sync();assert.equal(d.registration,'Approved');assert.equal(d.stage,'Discovery');assert.ok(d.opportunityId);
  for(const stage of ['Proposal','Negotiation','Won']){const before=d.stage;f.updateStage(d.id,stage,'Customer confirmed the agreement.',stage==='Won'?{wonAmount:82000,closeDate:'2026-10-15'}:{});assert.equal(d.stage,before);f.sync();assert.equal(d.stage,stage);assert.equal(e.crm.opportunities[d.opportunityId].stage,stage);}
- assert.equal(l.status,'Qualified');assert.equal(d.registration,'Approved');assert.equal(d.stage,'Won');
- assert.ok(l.history.some(h=>h.title==='Vendor lead update'));assert.ok(d.history.length>=8);
+ assert.equal(l.status,'Qualified');assert.equal(f.leadStage(l),'Converted');assert.equal(d.registration,'Approved');assert.equal(d.stage,'Won');
+ assert.ok(l.history.some(h=>h.title==='Lead approved by vendor'));assert.ok(d.history.length>=8);
  assert.ok(f.notifications().some(n=>n.recordId===d.id&&n.detail.includes('Won')));
 });
 
 test('CRM-assigned lead → accept → contact → follow-up → qualification → deal → Lost',()=>{
  const e=env(),f=e.flow,l=f.get('lead','L104'),origin=l.receivedFrom;
- assert.throws(()=>f.qualify(l.id),/Accept and contact/);
+ assert.throws(()=>f.qualify(l.id,bantValues),/Log a call/);
  assert.throws(()=>f.addActivity('lead',l.id,{type:'Note',note:'Some note'}),/accept/);
- f.accept(l.id);assert.equal(l.status,'Assigned');f.sync();assert.equal(l.status,'Accepted');
+ f.accept(l.id);assert.equal(l.status,'Assigned');f.sync();assert.equal(l.status,'Accepted');assert.equal(l.acceptedAt,fixed);assert.equal(f.leadDeadline(l).kind,'contact');
  f.addActivity('lead',l.id,{type:'Note',note:'Preparing for the customer meeting.'});f.sync();assert.equal(l.status,'Accepted');
- f.addActivity('lead',l.id,{type:'Call',note:'Customer confirmed their project need.'});f.sync();assert.equal(l.status,'Contacted');
+ f.addActivity('lead',l.id,{type:'Call',outcome:'Left a message',note:'Customer confirmed their project need.'});f.sync();assert.equal(l.status,'Working');assert.equal(l.activities.at(-1).outcome,'Left a message');
  f.addActivity('lead',l.id,{type:'Follow-up',note:'Share the proposed implementation plan.',dueDate:'2026-10-20'});f.sync();
  const activity=l.activities.at(-1);assert.equal(activity.completed,false);f.completeActivity('lead',l.id,activity.id);f.sync();assert.equal(l.activities.at(-1).completed,true);
- f.qualify(l.id);f.sync();assert.equal(l.status,'Qualification requested');f.sync();assert.equal(l.status,'Qualified');
+ f.qualify(l.id,bantValues);f.sync();assert.equal(l.status,'Qualified');
  const d=f.createDeal(dealValues(l.company),l.id);f.submitDeal(d.id);f.sync();f.updateStage(d.id,'Lost','Customer selected an existing supplier.',{lostReason:'Competitor'});f.sync();
  assert.equal(d.stage,'Lost');assert.equal(d.registration,'Approved');assert.equal(l.status,'Qualified');assert.equal(l.receivedFrom,origin);
  assert.deepEqual(e.crm.leads[l.crmId].activities,l.activities);assert.equal(e.crm.opportunities[d.opportunityId].outcomeReason,d.outcomeReason);
@@ -40,12 +45,38 @@ test('CRM-assigned lead → accept → contact → follow-up → qualification �
 test('a lead requiring information returns to review after the partner corrects it',()=>{
  const e=env(),f=e.flow,l=f.createLead({...values('Needs more detail'),need:'Explore CRM now'});f.submitLead(l.id);f.sync();f.sync();
  f.edit('lead',l.id,{need:'Customer needs a shared workspace for regional sales operations.'});assert.equal(l.need,'Explore CRM now');f.sync();
- f.submitLead(l.id);f.sync();assert.equal(l.status,'Submitted');f.sync();assert.equal(l.status,'Qualified');
+ f.submitLead(l.id);f.sync();assert.equal(l.status,'Submitted');f.sync();assert.equal(l.status,'Approved');
 });
 
-test('qualification can request more information or disqualify without creating a deal',()=>{
+test('vendor review can request more information or reject without creating a deal',()=>{
  const e=env(),f=e.flow,l=f.createLead({...values('Short need'),need:'CRM upgrade now'});f.submitLead(l.id);f.sync();f.sync();assert.equal(l.status,'Needs information');assert.ok(l.reviewReason);
- const other=f.createLead({...values('Outside territory'),region:'Other'});f.submitLead(other.id);f.sync();f.sync();assert.equal(other.status,'Disqualified');assert.throws(()=>f.createDeal(dealValues(other.company),other.id),/qualification/);
+ const other=f.createLead({...values('Outside territory'),region:'Other'});f.submitLead(other.id);f.sync();f.sync();assert.equal(other.status,'Rejected');assert.equal(other.rejectReason,'Outside territory');assert.equal(other.closedFrom,'Submitted');assert.throws(()=>f.createDeal(dealValues(other.company),other.id),/qualification/);
+ assert.throws(()=>f.addActivity('lead',other.id,{type:'Call',note:'Trying to call'}),/read-only/);assert.throws(()=>f.edit('lead',other.id,{contact:'Changed'}),/cannot be edited/);
+});
+
+test('vendor rejects duplicate registrations without exposing the other partner',()=>{
+ const e=env(),f=e.flow;for(const company of ['Beacon Medical','Larkspur Clinics','Evergreen Systems','Harbor Systems']){const l=f.createLead(values(company));f.submitLead(l.id);f.sync();f.sync();assert.equal(l.status,'Rejected',company);assert.equal(l.rejectReason,'Duplicate');assert.doesNotMatch(l.reviewReason,/another-partner|Acme|Negotiation/);}
+ const fresh=f.createLead(values('Brand new customer'));f.submitLead(fresh.id);f.sync();f.sync();assert.equal(fresh.status,'Approved');
+});
+
+test('vendor-assigned leads carry a 48-hour acceptance and 3-day first-contact deadline',()=>{
+ const e=env(),f=e.flow,l=f.get('lead','L104');l.assignedAt='2026-10-14T12:00:00.000Z';
+ assert.deepEqual(f.leadDeadline(l),{kind:'accept',due:'2026-10-16T12:00:00.000Z',overdue:false,hoursLeft:24,daysLeft:1});
+ l.assignedAt='2026-10-13T11:00:00.000Z';assert.equal(f.leadDeadline(l).overdue,true);
+ f.accept(l.id);f.sync();assert.deepEqual(f.leadDeadline(l),{kind:'contact',due:'2026-10-18T12:00:00.000Z',overdue:false,hoursLeft:72,daysLeft:3});
+ f.addActivity('lead',l.id,{type:'Email',outcome:'No response',note:'Sent an introduction email.'});f.sync();assert.equal(l.status,'Working');assert.equal(f.leadDeadline(l),null);
+ const approved=f.get('lead','L110');assert.equal(f.leadDeadline(approved).kind,'protection');
+});
+
+test('qualification needs first contact and all four BANT items; progress can be saved earlier',()=>{
+ const e=env(),f=e.flow,l=f.get('lead','L110');assert.equal(l.status,'Approved');assert.equal(f.permissions('lead',l.id).canBant,true);assert.equal(f.permissions('lead',l.id).canQualify,false);
+ f.edit('lead',l.id,{decisionMaker:'Priya Nair · VP, Operations',budgetConfirmed:true});f.sync();assert.equal(l.status,'Approved');assert.equal(f.bant(l).count,3);assert.deepEqual(f.bantMissing(l),['the customer need']);
+ assert.throws(()=>f.qualify(l.id,{needConfirmed:true}),/Log a call/);
+ f.addActivity('lead',l.id,{type:'Call',outcome:'Connected',note:'Walked through the support workflow.'});f.sync();assert.equal(l.status,'Working');assert.equal(f.permissions('lead',l.id).canQualify,true);
+ for(const missing of [{budgetConfirmed:false},{decisionMaker:''},{needConfirmed:false},{timeline:'12+ months'},{timeline:'Not sure yet'}])assert.throws(()=>f.qualify(l.id,{needConfirmed:true,...missing}),/To qualify this lead, confirm/);
+ assert.equal(e.s.outbox.filter(o=>o.recordId===l.id&&o.action==='qualify').length,0);
+ f.qualify(l.id,{needConfirmed:true});f.sync();assert.equal(l.status,'Qualified');assert.equal(l.qualifiedAt,fixed);assert.throws(()=>f.qualify(l.id,{}),/already qualified/);
+ assert.throws(()=>f.edit('lead',l.id,{value:1}),/identity is locked/);
 });
 
 test('large direct registrations wait for vendor review; approval remains distinct from winning',()=>{
@@ -107,7 +138,7 @@ test('offline queues survive reload; retry and discard retain the last confirmed
 });
 
 test('assigned lead can be declined with a reason; closed leads have no contact actions',()=>{
- const e=env(),f=e.flow,l=f.get('lead','L104');assert.throws(()=>f.decline(l.id,''),/reason/);f.decline(l.id,'Outside our service coverage.');f.sync();assert.equal(l.status,'Declined');assert.match(e.crm.leads[l.crmId].reviewReason,/coverage/);assert.throws(()=>f.accept(l.id),/awaiting/);assert.throws(()=>f.addActivity('lead',l.id,{type:'Call',note:'Trying to call'}),/accept/);
+ const e=env(),f=e.flow,l=f.get('lead','L104');assert.throws(()=>f.decline(l.id,''),/reason/);assert.throws(()=>f.decline(l.id,'Other','No'),/5 characters/);f.decline(l.id,'Outside our territory','Outside our service coverage.');f.sync();assert.equal(l.status,'Declined');assert.equal(l.declineReason,'Outside our territory');assert.equal(l.closedFrom,'Assigned');assert.match(e.crm.leads[l.crmId].reviewReason,/coverage/);assert.throws(()=>f.accept(l.id),/awaiting/);assert.throws(()=>f.addActivity('lead',l.id,{type:'Call',note:'Trying to call'}),/accept/);
 });
 
 test('follow-ups validate real dates and completion synchronizes to the CRM record',()=>{
@@ -126,7 +157,7 @@ test('CRM stage conflicts preserve the confirmed value until discard and refresh
 });
 
 test('unauthorized, revoked, and signed-out records are unavailable to partner actions',()=>{
- const e=env(),f=e.flow;f.sync();assert.ok(!f.list('lead').some(r=>r.company==='Private customer'));assert.throws(()=>f.get('lead','private-lead'),/not available/);
+ const e=env(),f=e.flow;f.sync();assert.ok(!f.list('lead').some(r=>r.company==='Larkspur Clinics'));assert.throws(()=>f.get('lead','private-lead'),/not available/);
  const l=f.get('lead','L104');e.crm.leads[l.crmId].partnerId='another-partner';assert.ok(!f.list('lead').some(r=>r.id===l.id));assert.throws(()=>f.accept(l.id),/not available/);assert.ok(!f.notifications().some(n=>n.recordId===l.id));f.sync();assert.ok(!f.list('lead').some(r=>r.id===l.id));
  e.state.authorized=false;assert.throws(()=>f.list('lead'),/Sign in/);assert.throws(()=>f.createLead(values()),/Sign in/);assert.throws(()=>f.sync(),/Sign in/);
 });
@@ -136,7 +167,7 @@ test('legacy preview records are preserved without inventing CRM approvals',()=>
  const before=JSON.stringify(state.sales);W.initialize(state,{migrate:true});assert.equal(JSON.stringify(state.sales),before);const created=f.createLead(values());assert.equal(f.list('lead').filter(l=>l.id===created.id).length,1);
 });
 
-test('starter workspace shows six leads; edited and created records survive sample reduction',()=>{const e=env();assert.equal(e.flow.list('lead').length,6);assert.equal(e.flow.list('lead').filter(l=>l.origin==='partner').length,4);assert.equal(e.flow.list('lead').filter(l=>l.origin==='crm').length,2);const l=e.flow.createLead(values('Keep my lead'));const before=JSON.stringify(l);delete e.s.compactSamplesVersion;W.initialize(e.state);assert.equal(JSON.stringify(e.flow.get('lead',l.id)),before);});
+test('starter workspace shows seven leads; edited and created records survive sample reduction',()=>{const e=env();assert.equal(e.flow.list('lead').length,7);assert.equal(e.flow.list('lead').filter(l=>l.origin==='partner').length,5);assert.equal(e.flow.list('lead').filter(l=>l.origin==='crm').length,2);const l=e.flow.createLead(values('Keep my lead'));const before=JSON.stringify(l);delete e.s.compactSamplesVersion;W.initialize(e.state);assert.equal(JSON.stringify(e.flow.get('lead',l.id)),before);});
 
 
 test('queued edits preserve independent CRM changes and surface same-field conflicts',()=>{
@@ -146,4 +177,20 @@ test('queued edits preserve independent CRM changes and surface same-field confl
 
 test('stage and activity requests preserve newer opportunity customer data and vendor notes',()=>{
  const e=env(),f=e.flow,d=f.get('deal','D103'),opp=e.crm.opportunities[d.opportunityId];f.updateStage(d.id,'Negotiation');opp.contact='New opportunity sponsor';f.sync();assert.equal(d.contact,'New opportunity sponsor');assert.equal(d.value,125000);f.addActivity('deal',d.id,{type:'Note',note:'Partner update'});opp.activities.push({id:'vendor-note',type:'Note',note:'Vendor update',time:fixed});f.sync();assert.ok(d.activities.some(a=>a.id==='vendor-note'));assert.equal(d.activities.at(-1).note,'Partner update');
+});
+
+
+test('saved leads from the earlier flow migrate once without losing history',()=>{
+ const e=env(),f=e.flow;
+ // Recreate a browser that saved data before the lead-flow upgrade.
+ delete e.s.leadFlowVersion;const helios=f.get('lead','L105'),meridian=f.get('lead','L102');
+ const old=f.createLead(values('Old disqualified'));Object.assign(old,{status:'Disqualified',crmId:'00Q-old',sync:{status:'synced'}});e.crm.leads[old.crmId]=JSON.parse(JSON.stringify(old));
+ const waiting=f.createLead(values('Old qualified'));Object.assign(waiting,{status:'Qualified',crmId:'00Q-legacy',sync:{status:'synced'}});e.crm.leads[waiting.crmId]=JSON.parse(JSON.stringify(waiting));
+ for(const r of [helios,e.crm.leads[helios.crmId]])r.status='Qualification requested';
+ e.s.outbox.push({id:'OP-old',type:'lead',recordId:helios.id,partnerId:e.s.partnerId,action:'qualify',payload:{},state:'pending',attempts:0});helios.sync={status:'pending',operationId:'OP-old'};e.crm.jobs.push({kind:'qualify',crmId:helios.crmId,due:1});
+ const history=helios.history.length;W.initialize(e.state);
+ assert.equal(helios.status,'Working');assert.equal(helios.sync.status,'synced');assert.equal(e.s.outbox.find(o=>o.id==='OP-old').state,'cancelled');assert.equal(helios.history.length,history+1);assert.ok(!e.crm.jobs.some(j=>j.crmId===helios.crmId));
+ assert.equal(old.status,'Rejected');assert.equal(e.crm.leads[old.crmId].status,'Rejected');assert.equal(waiting.legacyQualified,true);assert.equal(meridian.status,'Submitted');
+ assert.ok(e.crm.jobs.some(j=>j.crmId===meridian.crmId));
+ const once=JSON.stringify(e.state);W.initialize(e.state);assert.equal(JSON.stringify(e.state),once);
 });
