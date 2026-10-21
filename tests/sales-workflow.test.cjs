@@ -167,7 +167,7 @@ test('legacy preview records are preserved without inventing CRM approvals',()=>
  const before=JSON.stringify(state.sales);W.initialize(state,{migrate:true});assert.equal(JSON.stringify(state.sales),before);const created=f.createLead(values());assert.equal(f.list('lead').filter(l=>l.id===created.id).length,1);
 });
 
-test('starter workspace shows seven leads; edited and created records survive sample reduction',()=>{const e=env();assert.equal(e.flow.list('lead').length,7);assert.equal(e.flow.list('lead').filter(l=>l.origin==='partner').length,5);assert.equal(e.flow.list('lead').filter(l=>l.origin==='crm').length,2);const l=e.flow.createLead(values('Keep my lead'));const before=JSON.stringify(l);delete e.s.compactSamplesVersion;W.initialize(e.state);assert.equal(JSON.stringify(e.flow.get('lead',l.id)),before);});
+test('starter workspace shows nine leads; edited and created records survive sample reduction',()=>{const e=env();assert.equal(e.flow.list('lead').length,9);assert.equal(e.flow.list('lead').filter(l=>l.origin==='partner').length,7);assert.equal(e.flow.list('lead').filter(l=>e.flow.leadStage(l)==='Qualified').length,3,'qualified leads ready to register');assert.equal(e.flow.list('lead').filter(l=>l.origin==='crm').length,2);const l=e.flow.createLead(values('Keep my lead'));const before=JSON.stringify(l);delete e.s.compactSamplesVersion;W.initialize(e.state);assert.equal(JSON.stringify(e.flow.get('lead',l.id)),before);});
 
 
 test('queued edits preserve independent CRM changes and surface same-field conflicts',()=>{

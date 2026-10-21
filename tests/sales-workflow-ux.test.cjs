@@ -159,3 +159,10 @@ test('New sample cards populate an empty saved column once without resetting oth
  e.f.deleteDraft('lead',cards[0].id);W.initialize(e.state);
  assert.equal(e.f.list('lead').filter(r=>r.origin==='partner'&&r.status==='Draft').length,1);
 });
+
+test('when every draft has been submitted, two new example drafts are ready on the next load',()=>{
+ const e=env(),drafts=()=>e.f.list('lead').filter(r=>r.origin==='partner'&&r.status==='Draft');
+ for(const r of drafts())e.f.submitLead(r.id);e.f.sync();assert.equal(drafts().length,0);
+ W.initialize(e.state);assert.deepEqual(drafts().map(r=>r.company),['Pinewood Studios','Halden Foods']);assert.ok(drafts().every(r=>r.consent&&r.sync.status==='local'));
+ for(const r of drafts())e.f.submitLead(r.id);e.f.sync();W.initialize(e.state);assert.deepEqual(drafts().map(r=>r.company),['Ridgeway Clinics','Seabright Labs'],'each refill uses new customers');
+});

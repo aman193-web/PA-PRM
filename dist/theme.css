@@ -1828,7 +1828,6 @@ textarea { font-family: var(--ui-font); resize: vertical; }
 .lead-next-action svg { width: 14px; height: 14px; transition: transform .15s; }
 .lead-next-action:hover { border-color: var(--brand); background: var(--brand); color: #fff; }
 .lead-next-action:hover svg { transform: translateX(2px); }
-.lead-next-loading { display: flex; align-items: center; color: #355b88 !important; font-weight: 550; }
 .sales-card.is-flash { animation: card-flash 2.4s ease-out; }
 @keyframes card-flash { 0% { box-shadow: 0 0 0 3px #2f9e6e66; transform: translateY(-2px); } 100% { box-shadow: 0 0 0 0 #2f9e6e00; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .sales-card.is-flash { animation: none; } .lead-next-action, .lead-next-action svg { transition: none; } }
@@ -1926,3 +1925,12 @@ textarea { font-family: var(--ui-font); resize: vertical; }
   .mgr-flow-steps li:nth-child(odd)::before { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .mgr-focus-bar i { transition: none; } }
+/* Loading buttons: the spinner sits inside the button while a submission waits for approval. */
+.is-loading { gap: 8px; cursor: progress; }
+.btn.is-loading:disabled { opacity: 1; }
+.btn-primary .sales-spinner { margin-right: 0; border-color: #ffffff59; border-top-color: #fff; }
+.lead-next-action.is-loading { gap: 7px; cursor: progress; }
+.lead-next-action.is-loading:hover { border-color: #c6d8ec; background: var(--brand-soft); color: #0b4f9e; }
+.lead-next-action .sales-spinner { width: 12px; height: 12px; margin-right: 0; }
+/* In-place refreshes of an open record skip the entrance animation, so status changes don't flicker. */
+.drawer-backdrop.no-enter, .drawer-backdrop.no-enter .app-dialog { animation: none; }

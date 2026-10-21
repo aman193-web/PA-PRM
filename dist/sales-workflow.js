@@ -209,9 +209,49 @@ function addVendorDemo(state){
 // Automatic review (program rules) is the default, so a partner's submission gets its decision in a few seconds.
 // Set once: a partner manager who switches to manual review keeps that choice.
 function defaultAutoReview(state){const crm=state.sales.crm;if(crm.autoReviewDefault)return;crm.autoReviewDefault=1;crm.reviewMode='auto';}
+// Registrations from other partners that wait for the partner manager (they were flagged or arrived
+// before automatic review), so the manager's decision queue has real work. Added once.
+function addVendorQueueDemo(state){
+ const crm=state.sales.crm;if(crm.vendorQueueDemo)return;crm.vendorQueueDemo=1;
+ const at=days=>new Date(Date.now()-days*864e5).toISOString(),on=days=>at(-days).slice(0,10);
+ const email=(contact,company)=>contact.toLowerCase().replace(/[^a-z ]/g,'').replace(/\s+/g,'.')+'@'+company.toLowerCase().replace(/[^a-z]/g,'')+'.example';
+ const lead=(id,partnerId,company,contact,origin,status,value,product,region,days,extra={})=>{const r={id,crmId:'00Q-'+id,partnerId,company,contact,email:email(contact,company),jobTitle:'Head of Operations',...LEAD_DEFAULTS,product,origin,status,value,region,source:origin==='crm'?'Vendor campaign':'Partner referral',receivedFrom:origin==='crm'?'Vendor · Salesforce':'Partner referral',need:'Bring sales and service teams onto one shared customer workspace.',consent:true,createdAt:at(days),updatedAt:at(days),activities:[],history:[],...extra};if(origin==='partner')r.submittedAt=at(days);else r.assignedAt=at(days);crm.leads[r.crmId]=r;return r;};
+ // Lead registrations waiting for a decision: one clean, one with too little detail.
+ lead('N206','another-partner','Fjord Analytics','Ingrid Holm','partner','Submitted',120000,'Sales Cloud','Europe',.3);
+ lead('C204','partner-cobalt','Orbit Retail Group','Wei Chen','partner','Submitted',64000,'Service Cloud','Asia Pacific',.6,{need:'Needs a CRM'});
+ // A vendor lead Cobalt hasn't accepted within 48 hours.
+ lead('C205','partner-cobalt','Marlow Energy','Tom Becker','crm','Assigned',88000,'Platform','Asia Pacific',3);
+ // Deal registrations waiting for a decision: a large one from a qualified lead, and one outside the territory.
+ const bank=crm.leads['00Q-N202'],deal=(id,partnerId,l,company,contact,name,product,value,region,days)=>{const d={id,crmId:'REG-'+id,partnerId,leadId:l?.id||null,company,contact,email:l?.email||email(contact,company),region,name,product,value,expectedClose:on(60),need:l?.need||'Replace spreadsheets with one sales pipeline across branches.',consent:true,confirmedNeed:true,registration:'Pending review',stage:null,opportunityId:null,reason:'Waiting for your partner manager to review this registration.',submittedAt:at(days),createdAt:at(days),updatedAt:at(days),activities:[],history:[]};if(l)l.dealId=id;crm.registrations[d.crmId]=d;return d;};
+ if(bank)deal('N303','another-partner',bank,bank.company,bank.contact,'Branch network rollout',bank.product,bank.value,bank.region,.15);
+ deal('C303','partner-cobalt',null,'Kowloon Freight','Ada Lau','Freight sales workspace','Sales Cloud',92000,'Other',.45);
+}
+// Qualified leads ready to register as deals, so the partner always has this step to try. Added once.
+function addQualifiedSamples(state){
+ const s=state.sales;if(s.qualifiedDemo)return;s.qualifiedDemo=1;
+ const now=new Date().toISOString();
+ for(const [id,company,contact,title,product,value,industry,need,timeline,days] of [
+  ['L111','Brightwater Hotels','Nina Alvarez','VP, Guest Experience','Service Cloud',145000,'Hospitality','Route guest requests from 14 hotels into one service desk with clear ownership.','0–3 months',9],
+  ['L112','Copperline Utilities','Marcus Hale','Director, Commercial Sales','Sales Cloud',210000,'Energy','Give the commercial sales team one pipeline and forecast instead of regional spreadsheets.','3–6 months',12]]){
+  if(s.leads.some(r=>r.id===id))continue;
+  const approvedAt=addDays(now,-days+1),contacted=addDays(now,-days+3),r={id,partnerId:s.partnerId,company,contact,email:contact.toLowerCase().replace(/\s+/g,'.')+'@'+company.toLowerCase().replace(/[^a-z]/g,'')+'.example',jobTitle:title,...LEAD_DEFAULTS,industry,product,rating:'Hot',timeline,origin:'partner',status:'Qualified',value,source:'Partner referral',receivedFrom:'Partner referral',region:'North America',need,consent:true,budgetConfirmed:true,needConfirmed:true,decisionMaker:contact+' · '+title,createdAt:addDays(now,-days),updatedAt:addDays(now,-1),submittedAt:addDays(now,-days),approvedAt,protectedUntil:addDays(approvedAt,PROTECTION_DAYS).slice(0,10),reviewReason:'Approved. No other partner has registered this customer, so it is yours to pursue for '+PROTECTION_DAYS+' days.',crmId:'00Q-'+id,nextStep:'',activities:[{id:'A-'+id,type:'Meeting',outcome:'Connected',note:'Discovery meeting: confirmed budget, decision maker, and timeline.',time:contacted,synced:true}],history:[{time:addDays(now,-days),title:'Lead created',detail:'Introduced by a partner referral.',actor:'Partner'},{time:approvedAt,title:'Lead approved by vendor',detail:'No conflicting registration found. Protected for '+PROTECTION_DAYS+' days.',actor:'Salesforce (simulated)'},{time:addDays(now,-1),title:'Lead qualified',detail:'Budget, authority, need, and timeline confirmed (BANT 4 of 4).',actor:'Partner'}],sync:{status:'synced'},sample:true};
+  s.leads.push(r);s.crm.leads[r.crmId]=copy(r);
+ }
+}
+// Demo convenience: submitting drafts moves them on within seconds, so when no drafts are left,
+// add two example customers that haven't been used yet, ready to submit.
+function refillDrafts(state){
+ const s=state.sales;if(s.leads.some(r=>r.partnerId===s.partnerId&&r.origin==='partner'&&r.status==='Draft'))return;
+ const drafts=()=>s.leads.filter(r=>r.partnerId===s.partnerId&&r.origin==='partner'&&r.status==='Draft').length,now=new Date().toISOString();
+ const pool=[['L121','Pinewood Studios','Clara Moss',54000,'Platform'],['L122','Halden Foods','Owen Price',76000,'Sales Cloud'],['L123','Ridgeway Clinics','Sara Kim',91000,'Service Cloud'],['L124','Seabright Labs','Leo Grant',67000,'Sales Cloud'],['L125','Norland Freight','Ivy Brooks',83000,'Platform'],['L126','Tamarack Retail','Ben Cole',58000,'Service Cloud']];
+ for(const [id,company,contact,value,product] of pool){
+  if(drafts()>=2)break;if(s.leads.some(r=>r.id===id)||s.crm.leads['00Q-'+id])continue;
+  s.leads.push({id,partnerId:s.partnerId,company,contact,email:contact.toLowerCase().replace(/\s+/g,'.')+'@'+company.toLowerCase().replace(/[^a-z]/g,'')+'.example',jobTitle:'Director, Operations',...LEAD_DEFAULTS,product,origin:'partner',status:'Draft',value,source:'Partner referral',receivedFrom:'Partner referral',region:'North America',need:'Bring regional customer data and sales reporting into one shared workspace.',consent:true,createdAt:now,updatedAt:now,crmId:null,nextStep:'',activities:[],history:[{time:now,title:'Lead created',detail:'Introduced by Partner referral',actor:'Partner'}],sync:{status:'local'},sample:true});
+ }
+}
 function initialize(state,{migrate=false}={}){
  replaceRetiredCompany(state);
- if(state.sales?.version===1){compactSamples(state);restoreSubmittedSample(state);addNewSamples(state);upgradeLeadFlow(state);normalizeLeads(state);addVendorDemo(state);defaultAutoReview(state);return;}
+ if(state.sales?.version===1){compactSamples(state);restoreSubmittedSample(state);addNewSamples(state);upgradeLeadFlow(state);normalizeLeads(state);addVendorDemo(state);addVendorQueueDemo(state);addQualifiedSamples(state);refillDrafts(state);defaultAutoReview(state);return;}
  const now=new Date().toISOString();
  const old=copy({leads:state.leads||[],deals:state.deals||[],activity:state.activity||[]});
  state.sales={version:1,partnerId:'partner-acme',sequence:1000,leads:[],deals:[],outbox:[],notifications:[],lastSync:null,failNext:false,crm:{leads:{},registrations:{},opportunities:{},processed:{},jobs:[],tick:0,reviewMode:'auto'}};
@@ -251,7 +291,7 @@ function initialize(state,{migrate=false}={}){
  });
  compactSamples(state);restoreSubmittedSample(state);addNewSamples(state);upgradeLeadFlow(state);normalizeLeads(state);
  s.notifications.push({id:'N100',partnerId:s.partnerId,type:'lead',recordId:d.id,title:'New CRM lead assigned',detail:'Harbor Systems is ready for you to accept.',time:now,read:false});
- addVendorDemo(state);defaultAutoReview(state);
+ addVendorDemo(state);addVendorQueueDemo(state);addQualifiedSamples(state);refillDrafts(state);defaultAutoReview(state);
 }
 function create(state,options={}){
  const s=state.sales,crm=s.crm,clock=options.now||(()=>new Date().toISOString()),persist=options.save||(()=>{}),auth=options.authorized||(()=>true);

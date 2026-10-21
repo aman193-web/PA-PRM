@@ -11,7 +11,7 @@ test('first screen offers the partner and partner manager portals; refresh retur
  a.element('portal-manager').onclick();assert.match(a.html(),/PARTNER MANAGER SIGN-IN/);assert.match(a.html(),/Continue with Microsoft/);a.element('microsoft-login').onclick();assert.equal(a.context.sessionStorage.getItem('prm-manager-session'),'1');assert.equal(a.location.href,'manager.html#overview');
  const viaLink=environment(undefined,'#manager');assert.match(viaLink.html(),/PARTNER MANAGER SIGN-IN/);viaLink.submit('welcome-login-form',{email:'riley@vendor.example',password:'x'});assert.equal(viaLink.location.href,'manager.html#overview');
  a.login();assert.match(a.html(),/class="sidebar/);
- a.run("workflow.createLead({company:'Preserved draft'})");const b=environment(a.saved(),'#deals');assert.equal(b.location.hash,'#welcome');assert.match(b.html(),/id="portal-partner"/);assert.equal(b.run('state.crm.connected'),true,'a connected Salesforce stays connected after a refresh');b.login();assert.equal(b.run("workflow.list('lead').filter(l=>l.company==='Preserved draft').length"),1);
+ a.run("workflow.createLead({company:'Preserved draft'})");const b=environment(a.saved(),'#deals');assert.equal(b.location.hash,'#welcome');assert.match(b.html(),/id="portal-partner"/);assert.equal(b.run('state.crm.connected'),false,'each sign-in starts at the Salesforce step');b.login();assert.equal(b.run("workflow.list('lead').filter(l=>l.company==='Preserved draft').length"),1);
  b.run('signOut()');assert.match(b.html(),/id="portal-partner"/);
 });
 
@@ -42,12 +42,12 @@ test('assigned lead UI accepts, logs contact and follow-up, qualifies, registers
 });
 
 test('board/list, search, filters and category navigation use the same scoped records',()=>{
- const a=environment();a.login();a.click({page:'leads'});assert.equal(a.run('scopedRecords().length'),5);assert.match(a.html(),/sales-board/);a.click({salesView:'list'});assert.match(a.html(),/data-table/);a.element('sales-search').oninput({target:{value:'Beacon',selectionStart:6}});assert.match(a.html(),/1 of 5 records/);assert.doesNotMatch(a.html(),/Cedar Analytics/);a.element('sales-filter').onchange({target:{value:'Draft'}});assert.match(a.html(),/No matching records/);
+ const a=environment();a.login();a.click({page:'leads'});assert.equal(a.run('scopedRecords().length'),7);assert.match(a.html(),/sales-board/);a.click({salesView:'list'});assert.match(a.html(),/data-table/);a.element('sales-search').oninput({target:{value:'Beacon',selectionStart:6}});assert.match(a.html(),/1 of 7 records/);assert.doesNotMatch(a.html(),/Cedar Analytics/);a.element('sales-filter').onchange({target:{value:'Draft'}});assert.match(a.html(),/No matching records/);
  a.click({page:'assigned'});assert.match(a.html(),/Harbor Systems/);assert.doesNotMatch(a.html(),/Beacon Medical/);assert.equal(a.run('salesQuery'),'');const b=environment(a.saved());b.login();assert.equal(b.run('salesView'),'list');
 });
 
 test('form validation and unchecked permissions block submission without losing a draft',()=>{
- const a=environment();a.login();act(a,'new-lead');a.submit('sales-record-form',{...leadValues,consent:undefined});const id=a.run('detailRecord.id');act(a,'submit-lead','lead',id);assert.match(a.element('sales-action-error').textContent,/permission/);assert.equal(a.run(`getRecord('lead','${id}').status`),'Draft');act(a,'edit','lead',id);a.submit('sales-record-form',leadValues);act(a,'submit-lead','lead',id);a.sync();
+ const a=environment();a.login();act(a,'new-lead');a.submit('sales-record-form',{...leadValues,consent:undefined});const id=a.run('detailRecord.id');act(a,'submit-lead','lead',id);assert.match(a.overlay(),/aria-label="Confirm permission"/,'missing permission is asked for, not an error');a.submit('consent-form',{});assert.match(a.element('sales-form-error').textContent,/permission/);assert.equal(a.run(`getRecord('lead','${id}').status`),'Draft');a.submit('consent-form',{consent:'on'});assert.equal(a.run(`getRecord('lead','${id}').consent`),true);a.sync();assert.equal(a.run(`getRecord('lead','${id}').status`),'Submitted');
  act(a,'edit','lead',id);a.submit('sales-record-form',{...leadValues,email:'bad email'});assert.match(a.element('sales-form-error').textContent,/valid customer email/);assert.equal(a.run(`getRecord('lead','${id}').email`),leadValues.email);
 });
 
@@ -99,7 +99,7 @@ test('sidebar has Leads, Deal Registrations, and CRM Opportunities; lead pages k
 });
 
 test('Draft column displays two cards and View all exposes the complete list',()=>{
- const a=environment();a.login();a.run("for(let i=0;i<4;i++)workflow.createLead({company:'Draft company '+i})");a.click({page:'leads'});const draftColumn=a.html().match(/<section class="lead-column"[\s\S]*?<\/section>/)[0];assert.equal((draftColumn.match(/class="card lead-card sales-card"/g)||[]).length,2);assert.match(draftColumn,/Showing 2 of 6 drafts/);act(a,'all-drafts');assert.equal(a.run('salesView'),'list');assert.equal(a.run('salesFilter'),'Draft');assert.match(a.html(),/6 of 9 records/);assert.match(a.html(),/Cedar Analytics/);for(let i=0;i<4;i++)assert.match(a.html(),new RegExp('Draft company '+i));
+ const a=environment();a.login();a.run("for(let i=0;i<4;i++)workflow.createLead({company:'Draft company '+i})");a.click({page:'leads'});const draftColumn=a.html().match(/<section class="lead-column"[\s\S]*?<\/section>/)[0];assert.equal((draftColumn.match(/class="card lead-card sales-card"/g)||[]).length,2);assert.match(draftColumn,/Showing 2 of 6 drafts/);act(a,'all-drafts');assert.equal(a.run('salesView'),'list');assert.equal(a.run('salesFilter'),'Draft');assert.match(a.html(),/6 of 11 records/);assert.match(a.html(),/Cedar Analytics/);for(let i=0;i<4;i++)assert.match(a.html(),new RegExp('Draft company '+i));
 });
 
 test('sign-in offers Google, Microsoft, and SSO, and each starts the same onboarding',()=>{
@@ -119,9 +119,9 @@ test('skip remains intentional through back navigation and resets with a new sig
  const a=environment();a.run("beginOnboarding();handleEntryAction('skip');handleEntryAction('back')");assert.match(a.html(),/STEP 1 OF 2/);a.run("handleEntryAction('skip');handleEntryAction('finish');signOut();beginOnboarding();handleEntryAction('finish')");assert.equal(a.run('state.crmSkipped'),false);assert.equal(a.run('state.onboarding'),0);assert.match(a.html(),/STEP 1 OF 2/);
 });
 
-test('once connected, Salesforce stays connected: the step shows it as connected and nothing asks again',()=>{
- const a=environment();a.login();a.run('signOut()');a.run('beginOnboarding()');assert.match(a.html(),/STEP 1 OF 2/);assert.match(a.html(),/Salesforce demo connected/);assert.doesNotMatch(a.html(),/data-entry="next" disabled/);
- a.run("handleEntryAction('next');handleEntryAction('finish')");assert.equal(a.location.hash,'#dashboard');assert.match(a.html(),/sync-status ok/);
+test('every sign-in shows the Salesforce step with Connect Salesforce and Connect later',()=>{
+ const a=environment();a.login();a.run('signOut()');a.run('beginOnboarding()');assert.match(a.html(),/STEP 1 OF 2/);assert.match(a.html(),/data-entry="connect"/);assert.match(a.html(),/Connect Salesforce/);assert.match(a.html(),/data-entry="skip"/);assert.match(a.html(),/Connect later/);
+ a.run("handleEntryAction('connect');confirmSetupConnection();handleEntryAction('next');handleEntryAction('finish')");assert.equal(a.location.hash,'#dashboard');assert.match(a.html(),/sync-status ok/);
  a.run('workflow.failNext()');act(a,'edit','lead','L105');a.submit('sales-record-form',{...leadValues,company:'Helios Freight',contact:'Marcus Lee'});a.sync();assert.match(a.html(),/Salesforce sync failed · retry/);assert.notEqual(a.location.hash,'#crm');
 });
 
@@ -135,7 +135,7 @@ test('dashboard keeps the journey hero, next moves without timings, stats, and a
 
 test('Submit for approval shows a short vendor review, then moves the lead to its next step',()=>{
  const a=environment();a.login();act(a,'new-lead');a.submit('sales-record-form',leadValues);const id=a.run('detailRecord.id');
- act(a,'submit-lead','lead',id);assert.match(a.overlay(),/Sending to Salesforce/);a.sync();assert.equal(a.run(`getRecord('lead','${id}').status`),'Submitted');assert.match(a.overlay(),/Vendor review in progress/);assert.match(a.overlay(),/sales-spinner/);
+ act(a,'submit-lead','lead',id);assert.match(a.overlay(),/btn btn-primary is-loading" disabled aria-busy="true"><span class="sales-spinner" aria-hidden="true"><\/span>Waiting for approval…/);a.sync();assert.equal(a.run(`getRecord('lead','${id}').status`),'Submitted');assert.match(a.overlay(),/Waiting for approval…/);
  assert.ok(a.run('reviewTimer'),'the vendor review is scheduled');a.review();a.sync();
  assert.equal(a.run(`getRecord('lead','${id}').status`),'Approved');assert.match(a.overlay(),/Log first contact/);assert.match(a.element('toast').textContent,/Lead approved by vendor · Workflow Customer · Approved\. Next: Log first contact\./);
  a.run("state.sales.crm.reviewMode='manual'");act(a,'new-lead');a.submit('sales-record-form',{...leadValues,company:'Manual Review Co',email:'pat@manualreview.example'});const m=a.run('detailRecord.id');act(a,'submit-lead','lead',m);a.sync();assert.match(a.overlay(),/Check approval status/,'manual review waits for the partner manager');
@@ -150,8 +150,8 @@ test('Deal Registrations and CRM Opportunities are separate lists of the same jo
 test('Submit for approval on a Draft card runs from the card, shows the review, and moves the lead on',()=>{
  const a=environment();a.login();a.click({page:'leads'});
  assert.match(a.html(),/data-sales-action="submit-lead" data-sales-type="lead" data-sales-id="L101" data-card="1"/);
- a.click({salesAction:'submit-lead',salesType:'lead',salesId:'L101',card:'1'});assert.equal(a.overlay(),'','stays on the board');assert.equal(a.location.hash,'#leads');assert.match(a.html(),/lead-next-loading[^]*Sending to Salesforce/);
- a.sync();assert.equal(a.run("getRecord('lead','L101').status"),'Submitted');assert.equal(a.overlay(),'');assert.equal(a.run("recordAction(getRecord('lead','L101'),'lead').label"),'Vendor review in progress');
+ a.click({salesAction:'submit-lead',salesType:'lead',salesId:'L101',card:'1'});assert.equal(a.overlay(),'','stays on the board');assert.equal(a.location.hash,'#leads');assert.match(a.html(),/lead-next-action is-loading" disabled aria-busy="true"><span class="sales-spinner" aria-hidden="true"><\/span>Waiting for approval…/);
+ a.sync();assert.equal(a.run("getRecord('lead','L101').status"),'Submitted');assert.equal(a.overlay(),'');assert.equal(a.run("recordAction(getRecord('lead','L101'),'lead').label"),'Waiting for approval');
  a.review();a.sync();assert.equal(a.run("getRecord('lead','L101').status"),'Approved');assert.equal(a.overlay(),'');assert.match(a.element('toast').textContent,/Lead approved by vendor · Cedar Analytics · Approved\. Next: Log first contact\./);
  assert.equal(a.run("recordAction(getRecord('lead','L101'),'lead').action"),'first-contact');
  // A step that needs a dialog opens it from the card and comes back to the board.

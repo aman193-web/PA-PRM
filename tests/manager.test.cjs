@@ -68,7 +68,7 @@ test('manager signs in, reviews the queue, and approves with one click',()=>{
  assert.match(m.html(),/<h1>Good (morning|afternoon|evening), Riley\.<\/h1>/);assert.match(m.html(),/Decision queue/);assert.match(m.html(),/nav-badge/);assert.match(m.html(),/Live sync/);
  m.click({page:'queue'});assert.match(m.html(),/<h1>Lead reviews<\/h1>/);assert.match(m.html(),/Meridian Logistics/);assert.match(m.html(),/No duplicates/);
  m.click({open:'00Q-L102'});assert.match(m.overlay(),/Recommended: Approve/);assert.match(m.overlay(),/No duplicate records/);assert.match(m.overlay(),/In program territory · North America/);
- m.click({decide:'approve'});assert.equal(m.overlay(),'');assert.equal(m.saved().sales.crm.leads['00Q-L102'].status,'Approved');assert.match(m.html(),/No registrations waiting/);assert.match(m.element('toast').textContent,/Approved · Meridian Logistics/);
+ m.click({decide:'approve'});assert.equal(m.overlay(),'');assert.equal(m.saved().sales.crm.leads['00Q-L102'].status,'Approved');const waiting=m.html().split('Recently decided')[0];assert.doesNotMatch(waiting,/00Q-L102/);assert.match(waiting,/Fjord Analytics/,'other partners’ registrations still wait');assert.match(m.element('toast').textContent,/Approved · Meridian Logistics/);
 });
 
 test('manager return, reject, assign, and reassign forms validate and save',()=>{
@@ -145,14 +145,14 @@ test('manager portal reviews deal registrations, with a nav badge, drawer checks
  p.run("go('opportunities')");assert.match(p.html(),/Live Deal Co/);
  // Reject with a reason from the drawer.
  m.click({openReg:'REG-D102'});m.click({decideReg:'reject'});assert.match(m.overlay(),/Reject registration/);m.submit('mgr-form',{reason:'Not enough customer evidence',note:''});assert.equal(m.saved().sales.crm.registrations['REG-D102'].registration,'Rejected');
- m.fireStorage(JSON.stringify(m.saved()));m.click({page:'registrations'});assert.match(m.html(),/No deal registrations waiting/);assert.doesNotMatch(m.html(),/Deal registrations<\/span><span class="nav-badge"/);
+ m.fireStorage(JSON.stringify(m.saved()));m.click({page:'registrations'});assert.doesNotMatch(m.html().split('Recently decided')[0],/REG-D102/);assert.match(m.html(),/Deal registrations<\/span><span class="nav-badge" aria-label="2 waiting">2</);
 });
 
 // ---- High-fidelity manager portal ----
 test('overview is a premium dashboard: hero, KPI tiles, charts, approvals, funnel, leaderboard, and live activity',()=>{
  const m=managerApp();const html=m.html();
  assert.match(html,/<h1>Good (morning|afternoon|evening), Riley\.<\/h1>/);
- for(const text of ['Partner-sourced pipeline','UP NEXT · 1 OF 2','Decision queue','Your day','Leads in progress','Revenue won · 12 months','Lead-to-deal conversion','Response time','Open pipeline by partner','Where the open pipeline sits','Lead-to-deal funnel','Partner leaderboard','Live partner activity'])assert.match(html,new RegExp(text));
+ for(const text of ['Partner-sourced pipeline','UP NEXT · 1 OF 7','Decision queue','Your day','Leads in progress','Revenue won · 12 months','Lead-to-deal conversion','Response time','Open pipeline by partner','Where the open pipeline sits','Lead-to-deal funnel','Partner leaderboard','Live partner activity'])assert.match(html,new RegExp(text));
  for(const chart of ['class="mgr-spark"','class="mgr-area"','class="mgr-seg-arc"','class="mgr-ring-value"','class="mgr-flow-step"','class="mgr-lb-row"'])assert.ok(html.includes(chart),chart);
  assert.match(html,/data-count="840000" data-fmt="short" data-key="pipeline">\$840K</);
  assert.match(html,/data-open="00Q-L102"/);assert.match(html,/data-open-reg="REG-D102"/);assert.match(html,/All 5 checks passed/);
@@ -169,7 +169,7 @@ test('overview charts respond to their controls without leaving the page',()=>{
  m.click({mix:'region'});let x=m.element('mgr-mix').innerHTML;for(const region of ['North America','Europe','Asia Pacific'])assert.match(x,new RegExp(region));assert.match(x,/data-mix="region" class="active"/);
  m.click({mix:'product'});assert.match(m.element('mgr-mix').innerHTML,/Service Cloud/);
  m.click({inbox:'deal'});let i=m.element('mgr-inbox').innerHTML;assert.match(i,/data-open-reg="REG-D102"/);assert.doesNotMatch(i,/data-open="00Q-L102"/);
- m.click({inbox:'risk'});assert.match(m.element('mgr-inbox').innerHTML,/Nothing here right now/);
+ m.click({inbox:'risk'});i=m.element('mgr-inbox').innerHTML;assert.match(i,/Marlow Energy/);assert.match(i,/data-reassign="00Q-C205"/);assert.doesNotMatch(i,/Fjord Analytics/);
  m.click({board:'won'});const b=m.element('mgr-board').innerHTML;assert.match(b,/data-board="won" class="active"/);assert.ok(b.indexOf('Northbridge Consulting')<b.indexOf('Acme Partners'),'sorted by 12-month revenue');
 });
 
@@ -180,7 +180,7 @@ test('overview drill-throughs and one-click approvals update the dashboard live'
  m.click({page:'overview'});assert.match(m.html(),/data-quick="lead:00Q-L102"/);
  m.click({quick:'lead:00Q-L102'});assert.equal(m.saved().sales.crm.leads['00Q-L102'].status,'Approved');assert.match(m.element('toast').textContent,/Approved · Meridian Logistics/);const inbox=m.html().split('id="mgr-inbox"')[1].split('id="mgr-today"')[0];assert.doesNotMatch(inbox,/00Q-L102/);assert.match(m.html().split('id="mgr-live"')[1],/Riley Chen: registration approved · <b>Meridian Logistics/);
  const pipeline=()=>Number(m.html().match(/data-count="(\d+)" data-fmt="short" data-key="pipeline"/)[1]),before=pipeline();
- m.click({quick:'reg:REG-D102'});assert.equal(m.saved().sales.crm.registrations['REG-D102'].registration,'Approved');assert.equal(pipeline()-before,310000);assert.match(m.html(),/No decisions waiting/);
+ m.click({quick:'reg:REG-D102'});assert.equal(m.saved().sales.crm.registrations['REG-D102'].registration,'Approved');assert.equal(pipeline()-before,310000);assert.doesNotMatch(m.html().split('id="mgr-inbox"')[1].split('id="mgr-today"')[0],/REG-D102/);
 });
 
 test('partners page shows tier, performance, and target; a partner drawer lists their leads and opportunities',()=>{
@@ -219,13 +219,13 @@ test('manager pages do not link to the partner portal; sign-out returns to the f
 });
 
 test('overview is action first: up next, quick decisions, skip, and progress through the day',()=>{
- const m=managerApp();let html=m.html();
- const focus=()=>m.html().match(/<div class="mgr-focus"[\s\S]*?<div class="mgr-focus-progress">/)[0];
- assert.match(focus(),/Meridian Logistics/);assert.match(focus(),/data-quick="lead:00Q-L102"/);assert.match(focus(),/data-ov-skip="lead:00Q-L102"/);assert.match(html,/0 done today/);
- assert.match(html,/id="mgr-today"/);assert.match(html,/Lead registrations<\/span><b class="amber">1<\/b>/);assert.match(html,/data-action="mode"/);
- m.click({ovSkip:'lead:00Q-L102'});assert.match(focus(),/Atlas Manufacturing/);assert.match(focus(),/UP NEXT · 2 OF 2/);
- m.click({quickReject:'reg:REG-D102'});assert.match(m.overlay(),/aria-label="Reject registration"/);m.click({action:'close'});
- m.click({quickReturn:'00Q-L102'});assert.match(m.overlay(),/aria-label="Return for information"/);m.click({action:'close'});
- m.click({quick:'reg:REG-D102'});assert.match(m.element('toast').textContent,/Next up: Meridian Logistics · lead registration\./);assert.match(m.html(),/1 done today/);assert.match(focus(),/Meridian Logistics/);
- m.click({quick:'lead:00Q-L102'});assert.match(m.element('toast').textContent,/The queue is clear\./);assert.match(m.html(),/ALL CLEAR/);assert.match(m.html(),/2 done today/);
+ const m=managerApp(),focus=()=>m.html().match(/<div class="mgr-focus"[\s\S]*?<div class="mgr-focus-progress">/)[0];let html=m.html();
+ // Oldest first: Cobalt's lead registration with too little detail.
+ assert.match(focus(),/Orbit Retail Group/);assert.match(focus(),/UP NEXT · 1 OF 7/);assert.match(focus(),/data-quick-return="00Q-C204"/);assert.match(html,/0 done today/);
+ assert.match(html,/id="mgr-today"/);assert.match(html,/Lead registrations<\/span><b class="amber">3<\/b>/);assert.match(html,/Deal registrations<\/span><b class="amber">3<\/b>/);assert.match(html,/Responses at risk<\/span><b class="red">1<\/b>/);
+ m.click({quickReturn:'00Q-C204'});assert.match(m.overlay(),/aria-label="Return for information"/);m.click({action:'close'});
+ m.click({ovSkip:'lead:00Q-C204'});assert.match(focus(),/Kowloon Freight/);assert.match(focus(),/data-quick-reject="reg:REG-C303"/);
+ m.click({quickReject:'reg:REG-C303'});assert.match(m.overlay(),/aria-label="Reject registration"/);m.submit('mgr-form',{reason:'Outside territory',note:''});assert.equal(m.saved().sales.crm.registrations['REG-C303'].registration,'Rejected');assert.match(m.html(),/1 done today/);
+ assert.match(focus(),/Fjord Analytics/);m.click({quick:'lead:00Q-N206'});assert.equal(m.saved().sales.crm.leads['00Q-N206'].status,'Approved');assert.match(m.element('toast').textContent,/Approved · Fjord Analytics\..*Next up: Granite Peak Bank · deal registration\./);assert.match(m.html(),/2 done today/);
+ m.click({inbox:'risk'});assert.match(m.element('mgr-inbox').innerHTML,/data-reassign="00Q-C205"/);
 });
