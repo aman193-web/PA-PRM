@@ -183,7 +183,8 @@ test('all partner leads filter by stage group and partner; search finds partners
  m.element('mgr-search').oninput({target:{value:'zzz'}});assert.match(m.element('mgr-search-results').innerHTML,/No matches/);
 });
 
-test('the manager portal does not link to the partner portal',()=>{
- const m=environment(undefined,'',['sales-workflow.js','manager.js']);assert.doesNotMatch(m.html(),/index\.html|partner portal/i);m.click({action:'signin'});
- for(const page of ['overview','queue','registrations','distribution','leads','opportunities','partners']){m.click({page});assert.doesNotMatch(m.html(),/index\.html|Open partner portal/i);}
+test('manager pages do not link to the partner portal; sign-out returns to the first screen',()=>{
+ const m=environment(undefined,'',['sales-workflow.js','manager.js']);assert.match(m.html(),/href="index.html">← Choose a different portal/);m.click({action:'signin'});
+ for(const page of ['overview','queue','registrations','distribution','leads','opportunities','partners']){m.click({page});assert.doesNotMatch(m.html(),/index\.html|partner portal/i);}
+ m.click({action:'signout'});assert.equal(m.location.href,'index.html');assert.equal(m.context.sessionStorage.getItem('prm-manager-session'),null);
 });

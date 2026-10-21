@@ -1412,6 +1412,22 @@ textarea { font-family: var(--ui-font); resize: vertical; }
 .sync-status.failed { border-color: #f2d8d8; color: #a84444; }
 .sync-status.failed i { background: #c45151; }
 .welcome-providers { display: grid; gap: 10px; }
+.portal-cards { display: grid; gap: 12px; }
+.portal-card { display: flex; align-items: flex-start; gap: 16px; width: 100%; padding: 20px; border: 1px solid #dce6f1; border-radius: 14px; background: #fff; text-align: left; box-shadow: 0 2px 3px #173a6406; transition: border-color .16s, box-shadow .16s, transform .16s; }
+.portal-card:hover { border-color: #a9bdd5; box-shadow: 0 8px 22px #173a640f; transform: translateY(-1px); }
+.portal-card:focus-visible { outline: 3px solid #0969da40; outline-offset: 2px; }
+.portal-icon { display: grid; place-items: center; width: 44px; height: 44px; flex-shrink: 0; border-radius: 12px; background: var(--brand-soft); color: var(--brand); }
+.portal-icon svg { width: 22px; height: 22px; }
+#portal-manager .portal-icon { background: #102f57; color: #a9d0ff; }
+.portal-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.portal-copy b { color: var(--ink); font-size: 17px; font-weight: 650; letter-spacing: -.3px; }
+.portal-copy small { color: var(--muted); font-size: 13px; line-height: 1.55; }
+.portal-cta { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--brand); font-size: 13px; font-weight: 600; }
+.portal-cta svg { width: 15px; height: 15px; transition: transform .16s; }
+.portal-card:hover .portal-cta svg { transform: translateX(3px); }
+.welcome-back { display: inline-flex; margin: 0 0 18px; padding: 0; color: var(--muted); font-size: 13px; font-weight: 500; }
+.welcome-back:hover { color: var(--brand); }
+@media (prefers-reduced-motion: reduce) { .portal-card, .portal-cta svg { transition: none; } .portal-card:hover { transform: none; } }
 .welcome-providers .btn svg { width: 20px; height: 20px; }
 .wizard-steps { margin: 0 0 18px; }
 .extract-chip { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: #eaf2fd; color: #355b88; font-size: 10px; font-weight: 600; letter-spacing: .2px; vertical-align: 1px; }
@@ -1496,10 +1512,11 @@ textarea { font-family: var(--ui-font); resize: vertical; }
 
 .mgr-pipeline { padding: 16px 20px 20px; }
 .mgr-mini-label { display: block; margin: 0 0 10px; color: #77859a; font-size: 10px; font-weight: 600; letter-spacing: .8px; }
-.mgr-flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin: 0 0 22px; padding: 0; list-style: none; }
+.mgr-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 6px; margin: 0 0 22px; padding: 0; list-style: none; }
 .mgr-flow li { position: relative; padding: 10px 8px; border-radius: 8px; background: #f5f8fc; text-align: center; }
 .mgr-flow b { display: block; color: var(--ink); font-size: 20px; font-weight: 650; line-height: 1.2; }
-.mgr-flow span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; line-height: 1.3; }
+.mgr-flow span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; line-height: 1.3; overflow-wrap: normal; word-break: normal; hyphens: none; }
+.mgr-panel > .card-header .text-link { white-space: nowrap; }
 .mgr-bars { display: grid; gap: 12px; }
 .mgr-bar { display: grid; grid-template-columns: 112px 1fr 64px; align-items: center; gap: 12px; font-size: 13px; }
 .mgr-bar > span:first-child { color: var(--text); font-weight: 500; }
@@ -1519,8 +1536,8 @@ textarea { font-family: var(--ui-font); resize: vertical; }
 .mgr-tier.gold { background: #fbf4e2; color: #8a6a1f; }
 .mgr-progress { display: block; height: 6px; border-radius: 999px; background: #eef2f7; overflow: hidden; }
 .mgr-progress i { display: block; height: 100%; border-radius: inherit; background: var(--brand); }
-.mgr-target-cell { min-width: 120px; }
-.mgr-target-cell .mgr-progress { display: inline-block; width: 72px; vertical-align: middle; }
+.mgr-target-cell { min-width: 108px; white-space: nowrap; }
+.mgr-target-cell .mgr-progress { display: inline-block; width: 60px; vertical-align: middle; }
 .mgr-target-cell small { margin-left: 8px; color: var(--muted); font-size: 12px; }
 .mgr-partner-link { padding: 0; color: var(--text); font-weight: 500; text-align: left; }
 .mgr-partner-link b { color: var(--ink); font-weight: 600; }

@@ -17,7 +17,7 @@
 
 ## Partner-created lead to Won
 
-1. Sign in (Google, Microsoft, SSO, or email; all demo). Salesforce is already connected, so onboarding shows the assigned program; enter the dashboard.
+1. On the first screen choose Partner, then sign in (Google, Microsoft, SSO, or email; all demo). Connect Salesforce or select Connect later, view the assigned program, and enter the dashboard.
 2. My Leads → Create lead. Enter customer, region, contact, email, product interest, positive estimated value, customer need, and sharing permission; optional details are under More details. Select Submit for approval, or Save draft to finish later.
 3. Observe pending synchronization, then Pending approval. The vendor CRM now has the lead. A saved draft can also be opened and submitted separately.
 4. The registration waits in the partner manager's queue (`manager.html` → Lead reviews). The manager checks duplicates, territory, and details, then approves it, which protects it for the partner for 90 days. The open partner portal syncs at once and shows a notification that links back to the record. Approval does not create an opportunity. With automatic review on, Refresh Salesforce delivers the decision instead.
@@ -78,4 +78,4 @@ Automated verification covers the existing journeys plus the close/withdraw, ide
 
 The final sidebar contains one Leads entry. Assigned leads and deals remain available through workspace tabs. New lead columns show two cards; New registration columns show two. Submitted and Disqualified lead columns show one card each. View all shows every retained record in list view. Welcome and onboarding were preserved unchanged during the partner-only and navigation refinements.
 
-Salesforce is connected from the start (the vendor connects it), so there is no connect step and partners are never redirected to Salesforce updates. Failed or offline updates stay queued, and the header sync chip shows how many are waiting. Salesforce updates → Connect Salesforce opens the same confirmation flow in the portal and synchronizes saved requests after confirmation.
+Salesforce setup is optional: Connect later opens the program step and dashboard without marking the CRM connected. Leads and registrations can still be created; submitted requests stay queued, and the header sync chip shows how many are waiting. The portal never redirects to Salesforce updates; connect from there when ready. Once connected, Salesforce stays connected across refreshes and sign-ins. Salesforce updates → Connect Salesforce opens the same confirmation flow in the portal and synchronizes saved requests after confirmation.

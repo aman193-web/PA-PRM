@@ -4,13 +4,18 @@ const leadValues={company:'Workflow Customer',contact:'Taylor Reed',email:'taylo
 const registration={...leadValues,name:'Regional rollout',product:'Sales Cloud',expectedClose:'2026-12-20',confirmedNeed:'on'};
 const act=(app,action,type,id,extra={})=>app.click({salesAction:action,salesType:type,salesId:id,...extra});
 
-test('welcome and refresh guard portal access while retaining saved sales records',()=>{
- const a=environment();assert.match(a.html(),/welcome-login-form/);a.run("go('deals')");assert.match(a.html(),/welcome-login-form/);a.login();assert.match(a.html(),/class="sidebar/);
- a.run("workflow.createLead({company:'Preserved draft'})");const b=environment(a.saved(),'#deals');assert.equal(b.location.hash,'#welcome');assert.equal(b.run('state.crm.connected'),true,'Salesforce stays connected after a refresh');assert.match(b.html(),/welcome-login-form/);b.login();assert.equal(b.run("workflow.list('lead').filter(l=>l.company==='Preserved draft').length"),1);
+test('first screen offers the partner and partner manager portals; refresh returns to it while keeping records',()=>{
+ const a=environment();assert.match(a.html(),/id="portal-partner"/);assert.match(a.html(),/id="portal-manager"/);assert.doesNotMatch(a.html(),/welcome-login-form/);
+ a.run("go('deals')");assert.match(a.html(),/id="portal-partner"/);a.element('portal-partner').onclick();assert.match(a.html(),/welcome-login-form/);assert.match(a.html(),/Choose a different portal/);
+ a.element('welcome-back').onclick();assert.match(a.html(),/id="portal-manager"/);
+ a.element('portal-manager').onclick();assert.equal(a.context.sessionStorage.getItem('prm-manager-session'),'1');assert.equal(a.location.href,'manager.html#overview');
+ a.login();assert.match(a.html(),/class="sidebar/);
+ a.run("workflow.createLead({company:'Preserved draft'})");const b=environment(a.saved(),'#deals');assert.equal(b.location.hash,'#welcome');assert.match(b.html(),/id="portal-partner"/);assert.equal(b.run('state.crm.connected'),true,'a connected Salesforce stays connected after a refresh');b.login();assert.equal(b.run("workflow.list('lead').filter(l=>l.company==='Preserved draft').length"),1);
+ b.run('signOut()');assert.match(b.html(),/id="portal-partner"/);
 });
 
-test('email login does not store a password and opens the program step with Salesforce connected',()=>{
- const a=environment();a.submit('welcome-login-form',{email:'demo@example.com',password:'Never-store-this'});assert.equal(a.run('state.user.email'),'demo@example.com');assert.doesNotMatch(JSON.stringify(a.saved()),/Never-store-this/);assert.match(a.html(),/Your partner program/);assert.equal(a.run('state.crm.connected'),true);assert.doesNotMatch(a.html(),/<input|<select|<form|60-Second Deal/);a.run("handleEntryAction('finish')");assert.equal(a.location.hash,'#dashboard');a.run('signOut()');assert.match(a.html(),/welcome-login-form/);
+test('email login does not store a password and connection requires explicit confirmation',()=>{
+ const a=environment();a.element('portal-partner').onclick();a.submit('welcome-login-form',{email:'demo@example.com',password:'Never-store-this'});assert.equal(a.run('state.user.email'),'demo@example.com');assert.doesNotMatch(JSON.stringify(a.saved()),/Never-store-this/);assert.match(a.html(),/STEP 1 OF 2/);a.run("handleEntryAction('next');handleEntryAction('finish')");assert.equal(a.run('state.onboarding'),0);a.run("handleEntryAction('connect');closeModal();confirmSetupConnection()");assert.equal(a.run('state.crm.connected'),false);a.run("handleEntryAction('connect');confirmSetupConnection();handleEntryAction('next')");assert.match(a.html(),/STEP 2 OF 2/);assert.doesNotMatch(a.html(),/<input|<select|<form|60-Second Deal/);a.run("handleEntryAction('finish')");assert.equal(a.location.hash,'#dashboard');a.run('signOut()');assert.match(a.html(),/id="portal-partner"/);
 });
 
 test('all partner routes render with consistent headings and no vendor administration',()=>{
@@ -25,7 +30,7 @@ test('UI registers a lead, gets vendor approval, qualifies with BANT, converts, 
  act(a,'qualify','lead',id);assert.match(a.overlay(),/aria-label="Qualify lead"/);a.submit('sales-qualify-form',{value:'82000',budgetConfirmed:'on',decisionMaker:'Taylor Reed · Director',need:leadValues.need,needConfirmed:'on',timeline:'0–3 months'});a.sync();assert.equal(a.run(`getRecord('lead','${id}').status`),'Qualified');assert.match(a.overlay(),/Register deal/);
  a.registerDeal(id,registration);const d=a.run('detailRecord.id');assert.equal(a.location.hash,'#deals');assert.match(a.overlay(),/Submit registration/);act(a,'submit-deal','deal',d);a.sync();assert.match(a.overlay(),/02 · DEAL REGISTRATION/);assert.match(a.overlay(),/03 · CRM OPPORTUNITY/);assert.match(a.overlay(),/Approved/);assert.match(a.overlay(),/Discovery/);assert.doesNotMatch(a.overlay(),/>Won<\/strong>/);
  for(const stage of ['Proposal','Negotiation','Won']){act(a,'stage','deal',d);a.submit('sales-stage-form',{stage,reason:'Customer confirmed the signed agreement.',...(stage==='Won'?{wonAmount:'82000',closeDate:'2026-10-15'}:{})});a.sync();assert.equal(a.run(`getRecord('deal','${d}').stage`),stage)}
- assert.equal(a.run(`getRecord('lead','${id}').status`),'Qualified');act(a,'source-lead','deal',d);assert.equal(a.run('detailRecord.id'),id);assert.match(a.overlay(),/View deal registration · Won/);a.run("go('opportunities')");assert.match(a.html(),/Workflow Customer/);a.run("go('dashboard')");assert.match(a.html(),/Open CRM opportunities/);
+ assert.equal(a.run(`getRecord('lead','${id}').status`),'Qualified');act(a,'source-lead','deal',d);assert.equal(a.run('detailRecord.id'),id);assert.match(a.overlay(),/View deal registration · Won/);a.run("go('opportunities')");assert.match(a.html(),/Workflow Customer/);a.run("go('dashboard')");assert.match(a.html(),/\$362,000/);
 });
 
 test('assigned lead UI accepts, logs contact and follow-up, qualifies, registers, then closes Lost',()=>{
@@ -92,22 +97,34 @@ test('Draft column displays two cards and View all exposes the complete list',()
 });
 
 test('sign-in offers Google, Microsoft, and SSO, and each starts the same onboarding',()=>{
- for(const provider of ['google-login','microsoft-login','sso-login']){const a=environment();assert.match(a.html(),/Continue with Google/);assert.match(a.html(),/Continue with Microsoft/);assert.match(a.html(),/Continue with SSO/);a.element(provider).onclick();assert.match(a.html(),/Your partner program/);}
+ for(const provider of ['google-login','microsoft-login','sso-login']){const a=environment();a.element('portal-partner').onclick();assert.match(a.html(),/Continue with Google/);assert.match(a.html(),/Continue with Microsoft/);assert.match(a.html(),/Continue with SSO/);a.element(provider).onclick();assert.match(a.html(),/STEP 1 OF 2/);assert.match(a.html(),/Connect Salesforce/);}
 });
 
-test('Salesforce is connected from the start: no connect step, and submissions never redirect to Salesforce updates',()=>{
- const a=environment();a.run('beginOnboarding()');assert.equal(a.run('state.crm.connected'),true);assert.match(a.html(),/Salesforce connected/);assert.match(a.html(),/LAST STEP/);assert.doesNotMatch(a.html(),/Connect later|Back to connection/);
- a.run("handleEntryAction('finish')");assert.equal(a.location.hash,'#dashboard');assert.match(a.html(),/sync-status ok/);
- a.click({page:'leads'});act(a,'new-lead');a.submit('sales-record-form',leadValues);const id=a.run('detailRecord.id');act(a,'submit-lead','lead',id);assert.equal(a.location.hash,'#leads','stays on the page the partner is working in');a.sync();assert.equal(a.run(`getRecord('lead','${id}').status`),'Submitted');assert.equal(a.location.hash,'#leads');assert.match(a.html(),/Salesforce synced/);
- a.run('workflow.failNext()');act(a,'edit','lead',id);a.submit('sales-record-form',{...leadValues,contact:'Changed Contact'});a.sync();assert.match(a.html(),/Salesforce sync failed · retry/);assert.equal(a.location.hash,'#leads');
- a.click({page:'crm'});assert.match(a.html(),/Connected to your vendor/);assert.doesNotMatch(a.html(),/data-sales-action="connect-salesforce"/);
+test('Connect later skips Salesforce without blocking program and dashboard access',()=>{
+ const a=environment();a.run('beginOnboarding()');assert.match(a.html(),/Connect later/);a.run("handleEntryAction('skip')");assert.equal(a.run('state.crm.connected'),false);assert.match(a.html(),/Connect CRM · Skipped/);assert.match(a.html(),/STEP 2 OF 2/);a.run("handleEntryAction('finish')");assert.equal(a.location.hash,'#dashboard');assert.equal(a.run('state.onboarding'),3);assert.doesNotMatch(a.html(),/Salesforce simulation · Changes stay on this device|Salesforce is not connected/);a.click({page:'leads'});assert.match(a.html(),/My Leads/);
 });
 
-test('dashboard shows only next actions and three pipeline counts',()=>{
+test('skipped connection keeps submissions queued without redirecting, and connecting later sends them',()=>{
+ const a=environment();a.run("beginOnboarding();handleEntryAction('skip');handleEntryAction('finish')");a.click({page:'leads'});act(a,'new-lead');a.submit('sales-record-form',leadValues);const id=a.run('detailRecord.id');act(a,'submit-lead','lead',id);assert.equal(a.location.hash,'#leads','never redirected to Salesforce updates');assert.equal(a.run(`getRecord('lead','${id}').status`),'Draft');assert.equal(a.run(`getRecord('lead','${id}').sync.status`),'pending');assert.match(a.html(),/Salesforce not connected · 1 update waiting/);
+ a.click({page:'crm'});assert.match(a.html(),/Connect Salesforce/);act(a,'connect-salesforce');a.click({action:'close'});a.run('confirmSetupConnection()');assert.equal(a.run('state.crm.connected'),false);act(a,'connect-salesforce');a.element('confirm-setup-connection').onclick();assert.equal(a.run('state.crm.connected'),true);assert.equal(a.run('state.onboarding'),3);a.sync();assert.equal(a.run(`getRecord('lead','${id}').status`),'Submitted');assert.equal(a.location.hash,'#crm');assert.match(a.html(),/Salesforce synced/);
+});
+
+test('skip remains intentional through back navigation and resets with a new sign-in',()=>{
+ const a=environment();a.run("beginOnboarding();handleEntryAction('skip');handleEntryAction('back')");assert.match(a.html(),/STEP 1 OF 2/);a.run("handleEntryAction('skip');handleEntryAction('finish');signOut();beginOnboarding();handleEntryAction('finish')");assert.equal(a.run('state.crmSkipped'),false);assert.equal(a.run('state.onboarding'),0);assert.match(a.html(),/STEP 1 OF 2/);
+});
+
+test('once connected, Salesforce stays connected: the step shows it as connected and nothing asks again',()=>{
+ const a=environment();a.login();a.run('signOut()');a.run('beginOnboarding()');assert.match(a.html(),/STEP 1 OF 2/);assert.match(a.html(),/Salesforce demo connected/);assert.doesNotMatch(a.html(),/data-entry="next" disabled/);
+ a.run("handleEntryAction('next');handleEntryAction('finish')");assert.equal(a.location.hash,'#dashboard');assert.match(a.html(),/sync-status ok/);
+ a.run('workflow.failNext()');act(a,'edit','lead','L105');a.submit('sales-record-form',{...leadValues,company:'Helios Freight',contact:'Marcus Lee'});a.sync();assert.match(a.html(),/Salesforce sync failed · retry/);assert.notEqual(a.location.hash,'#crm');
+});
+
+test('dashboard keeps the journey hero, next moves without timings, stats, and attention list',()=>{
  const a=environment();a.login();a.run("go('dashboard')");const html=a.html();
- assert.match(html,/Your next actions/);assert.match(html,/data-sales-action="new-deal"/);assert.match(html,/data-sales-action="new-lead"/);
- for(const label of ['Leads in progress','Registrations awaiting approval','Open CRM opportunities'])assert.match(html,new RegExp(label));
- assert.equal([...html.matchAll(/class="card stat"/g)].length,3);assert.doesNotMatch(html,/60-Second|sec elapsed|seconds/i);
+ assert.match(html,/<h1>Your partner workspace\.<\/h1>/);assert.match(html,/class="hero"/);assert.match(html,/A clear path/);assert.match(html,/Your next moves/);
+ for(const label of ['My Leads','Assigned Leads','CRM Opportunities','Qualified leads','Open opportunity value','Revenue won','Needs your attention'])assert.match(html,new RegExp(label));
+ assert.doesNotMatch(html,/hero-minute|\d+ sec\b|SECONDS/);
+ a.click({action:'my-deals'});assert.equal(a.location.hash,'#opportunities');
 });
 
 test('Deal Registrations and CRM Opportunities are separate lists of the same journey',()=>{
