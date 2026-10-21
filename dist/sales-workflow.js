@@ -206,12 +206,15 @@ function addVendorDemo(state){
  deal('C301','partner-cobalt',blue,'Bluefin Shipping','Grace Ho','Fleet sales pipeline','Sales Cloud',150000,'Proposal',19);
  deal('C302','partner-cobalt',null,'Quarry Point Builders','Daniel Lim','Project sales workspace','Platform',70000,'Lost',55,{region:'Asia Pacific',lostReason:'No budget',outcomeReason:'Budget moved to the next fiscal year.'});
 }
+// Automatic review (program rules) is the default, so a partner's submission gets its decision in a few seconds.
+// Set once: a partner manager who switches to manual review keeps that choice.
+function defaultAutoReview(state){const crm=state.sales.crm;if(crm.autoReviewDefault)return;crm.autoReviewDefault=1;crm.reviewMode='auto';}
 function initialize(state,{migrate=false}={}){
  replaceRetiredCompany(state);
- if(state.sales?.version===1){compactSamples(state);restoreSubmittedSample(state);addNewSamples(state);upgradeLeadFlow(state);normalizeLeads(state);addVendorDemo(state);return;}
+ if(state.sales?.version===1){compactSamples(state);restoreSubmittedSample(state);addNewSamples(state);upgradeLeadFlow(state);normalizeLeads(state);addVendorDemo(state);defaultAutoReview(state);return;}
  const now=new Date().toISOString();
  const old=copy({leads:state.leads||[],deals:state.deals||[],activity:state.activity||[]});
- state.sales={version:1,partnerId:'partner-acme',sequence:1000,leads:[],deals:[],outbox:[],notifications:[],lastSync:null,failNext:false,crm:{leads:{},registrations:{},opportunities:{},processed:{},jobs:[],tick:0,reviewMode:'manual'}};
+ state.sales={version:1,partnerId:'partner-acme',sequence:1000,leads:[],deals:[],outbox:[],notifications:[],lastSync:null,failNext:false,crm:{leads:{},registrations:{},opportunities:{},processed:{},jobs:[],tick:0,reviewMode:'auto'}};
  if(migrate){state.sales.legacyArchive=old;}
  const s=state.sales;
  function lead(id,company,contact,origin,status,value,source){
@@ -248,7 +251,7 @@ function initialize(state,{migrate=false}={}){
  });
  compactSamples(state);restoreSubmittedSample(state);addNewSamples(state);upgradeLeadFlow(state);normalizeLeads(state);
  s.notifications.push({id:'N100',partnerId:s.partnerId,type:'lead',recordId:d.id,title:'New CRM lead assigned',detail:'Harbor Systems is ready for you to accept.',time:now,read:false});
- addVendorDemo(state);
+ addVendorDemo(state);defaultAutoReview(state);
 }
 function create(state,options={}){
  const s=state.sales,crm=s.crm,clock=options.now||(()=>new Date().toISOString()),persist=options.save||(()=>{}),auth=options.authorized||(()=>true);

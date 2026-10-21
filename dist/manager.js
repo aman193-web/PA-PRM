@@ -61,13 +61,28 @@ function partnerStats(m,id){
   pending:m.queue().filter(r=>r.partnerId===id).length+m.registrationQueue().filter(d=>d.partnerId===id).length,attainment:target?Math.round((pipeline+wonTotal)*100/target):0,target};
 }
 // Everything waiting on the partner manager: registrations to decide first (oldest first), then response-time breaches.
+// Everything waiting on the partner manager, in the order to do it: registrations oldest first,
+// then response-time breaches. Each item carries its check result and the decision to offer.
 function attention(m){
- const decisions=[...m.queue().map(r=>({kind:'Lead registration',r,when:r.submittedAt||r.updatedAt,button:`<button class="btn btn-sm btn-primary" data-open="${r.crmId}">Review</button>`})),...m.registrationQueue().map(d=>({kind:'Deal registration',r:d,when:d.submittedAt||d.updatedAt,button:`<button class="btn btn-sm btn-primary" data-open-reg="${d.crmId}">Review</button>`}))].sort((a,b)=>String(a.when).localeCompare(String(b.when)));
+ const summary=c=>{const failed=c.items.filter(x=>!x.ok),warned=c.items.filter(x=>x.ok&&x.warn);return failed.length?{check:failed[0].label,tone:c.recommendation==='Reject'?'bad':'warn',rec:c.recommendation}:warned.length?{check:'Passed · '+warned[0].label,tone:'warn',rec:c.recommendation}:{check:'All '+c.items.length+' checks passed',tone:'ok',rec:c.recommendation};};
+ const decisions=[...m.queue().map(r=>({kind:'Lead registration',type:'lead',key:'lead:'+r.crmId,r,when:r.submittedAt||r.updatedAt,...summary(m.checks(r.crmId))})),...m.registrationQueue().map(d=>({kind:'Deal registration',type:'reg',key:'reg:'+d.crmId,r:d,when:d.submittedAt||d.updatedAt,...summary(m.registrationChecks(d.crmId))}))].sort((a,b)=>String(a.when).localeCompare(String(b.when)));
  const sla=[];for(const r of m.leads().filter(r=>r.origin==='crm')){const stage=m.stage(r),due=m.deadline(r);
-  if(stage==='Declined'||stage==='Assigned'&&due?.overdue)sla.push({kind:stage==='Declined'?'Declined by partner':'Not accepted in 48 h',sla:true,r,when:r.assignedAt,button:`<button class="btn btn-sm btn-outline btn-secondary" data-reassign="${r.crmId}">Reassign</button>`});
-  else if(stage==='Accepted'&&due?.overdue)sla.push({kind:'First contact overdue',sla:true,r,when:r.acceptedAt,button:`<button class="btn btn-sm btn-outline btn-secondary" data-open="${r.crmId}">View</button>`});}
+  if(stage==='Declined'||stage==='Assigned'&&due?.overdue)sla.push({kind:stage==='Declined'?'Declined by partner':'Not accepted in 48 h',type:'sla',key:'sla:'+r.crmId,sla:true,reassign:true,r,when:r.assignedAt,check:stage==='Declined'?'Declined · '+(r.declineReason||r.reviewReason||'no reason given'):'No response within the 48-hour window',tone:'bad'});
+  else if(stage==='Accepted'&&due?.overdue)sla.push({kind:'First contact overdue',type:'sla',key:'sla:'+r.crmId,sla:true,r,when:r.acceptedAt,check:'First contact was due '+date(due.due),tone:'bad'});}
  return [...decisions,...sla];
 }
+// Decisions and assignments you made today, read from the vendor log.
+function doneToday(m){const today=new Date().toISOString().slice(0,10);let n=0;for(const r of [...m.leads(),...m.registrations()])for(const h of r.vendorLog||[])if(h.actor===MANAGER.name&&String(h.time).slice(0,10)===today)n++;return n;}
+const nextFocus=items=>items.find(i=>!ov.skip.has(i.key))||items[0]||null;
+// The decision to offer for an item: approve when every check passed, otherwise reject or return; reassign for breaches.
+function actionButtons(i,hero){
+ const primary=hero?'btn mgr-btn-light':'btn btn-sm btn-primary',secondary=hero?'btn mgr-btn-ghost':'btn btn-sm btn-outline btn-secondary',id=i.r.crmId,open=i.type==='reg'?`data-open-reg="${id}"`:`data-open="${id}"`;
+ if(i.sla)return i.reassign?`<button class="${primary}" data-reassign="${id}">${icon('assign')}Reassign</button><button class="${secondary}" ${open}>View</button>`:`<button class="${primary}" ${open}>View lead</button>`;
+ const main=i.rec==='Approve'?`<button class="${primary} mgr-quick" data-quick="${i.type}:${id}">${icon('check')}Approve</button>`:i.rec==='Reject'?`<button class="${primary}" data-quick-reject="${i.type}:${id}">${icon('cross')}Reject</button>`:`<button class="${primary}" data-quick-return="${id}">Return for info</button>`;
+ return main+`<button class="${secondary}" ${open}>Review</button>`;
+}
+const checkChip=i=>`<span class="mgr-rec ${i.tone}">${icon(i.tone==='ok'?'check':i.tone==='bad'?'cross':'warn')}<span>${esc(i.check)}</span></span>`;
+const itemMeta=(m,i)=>`${esc(m.partnerName(i.r.partnerId))} · ${short(i.r.value)}${i.r.product&&i.r.product!=='Not sure yet'?' · '+esc(i.r.product):''} · ${ago(i.when)}`;
 // Recent partner and manager activity across the program, newest first.
 function feed(m,limit=8){
  const events=[],name=id=>`<b>${esc(m.partnerName(id))}</b>`;
@@ -85,24 +100,205 @@ function feed(m,limit=8){
 const feedList=list=>list.length?`<ul class="mgr-feed">${list.map(e=>`<li><span class="mgr-feed-icon">${icon(e.icon)}</span><button ${e.open}><span>${e.text}</span><time>${ago(e.time)}</time></button></li>`).join('')}</ul>`:'<p class="empty">No partner activity yet.</p>';
 
 // ---- Pages ----
+// ---- Overview: the partner manager's premium dashboard ----
+// Month-end reporting snapshots for the 11 months before this one, in $K (simulated history).
+// The current month is always computed live from Salesforce, so every decision shows up at once.
+const HISTORY={
+ 'another-partner':{pipeline:[180,205,230,220,265,300,320,350,385,405,430],won:[30,0,55,70,0,85,40,110,0,65,95]},
+ 'partner-acme':{pipeline:[90,110,125,140,160,170,185,210,230,215,205],won:[0,45,0,60,35,0,80,0,55,0,70]},
+ 'partner-cobalt':{pipeline:[0,0,0,15,25,40,55,70,85,105,125],won:[0,0,0,0,0,20,0,0,25,0,0]}};
+const SERIES_COLORS={'another-partner':'#0969da','partner-acme':'#f0a04b','partner-cobalt':'#8ecdf8'},FALLBACK_COLORS=['#5b7aa6','#b3c7e6','#2f9e6e'];
+const MIX_COLORS=['#0b4f9e','#0969da','#5aa2ee','#a9cff8','#d5e7fb'];
+const MIX_DIMS={stage:['Stage',o=>o.stage,OPEN],region:['Territory',o=>o.region||'Other',['North America','Europe','Asia Pacific','Other']],product:['Product',o=>o.product||'Other',['Sales Cloud','Service Cloud','Platform']]};
+let ov={metric:'pipeline',range:12,hidden:new Set(),mix:'stage',inbox:'all',board:'pipeline',skip:new Set()},entrance=true,trendModel=null,mixModel=[],seenEvents=null;
+const f1=v=>Math.round(v*10)/10;
+const reducedMotion=()=>!!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+// A rounded axis maximum whose quarter ticks are round numbers too.
+function niceMax(v){const e=Math.pow(10,Math.floor(Math.log10(v))),f=v/e;return [1,1.2,1.6,2,2.4,3,4,5,6,8,10].find(s=>f<=s)*e;}
+function monthSpan(n=12){const now=new Date(),out=[];for(let i=n-1;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);out.push({key:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'),label:d.toLocaleDateString('en-US',{month:'short'}),long:d.toLocaleDateString('en-US',{month:'long',year:'numeric'})});}return out;}
+// Pipeline (month-end open value) and revenue (closed won in the month) per partner for the last 12 months.
+function programData(m){
+ const span=monthSpan(12),current=span[11].key,opps=m.opportunities();
+ const series=m.partners().map((p,i)=>{
+  const h=HISTORY[p.id],mine=opps.filter(o=>o.partnerId===p.id);
+  const pipeline=[...(h?h.pipeline.map(v=>v*1000):Array(11).fill(0)),sum(mine.filter(o=>OPEN.includes(o.stage)))];
+  const won=[...(h?h.won.map(v=>v*1000):Array(11).fill(0)),0];
+  for(const o of mine.filter(o=>o.stage==='Won')){const k=String(o.closeDate||'').slice(0,7)||current;if(k<span[0].key)continue;const at=span.findIndex(s=>s.key===k);won[at<0?11:at]+=wonValue(o);}
+  return {id:p.id,name:p.name,color:SERIES_COLORS[p.id]||FALLBACK_COLORS[i%FALLBACK_COLORS.length],pipeline,won};
+ });
+ const total=key=>span.map((_,i)=>series.reduce((a,s)=>a+s[key][i],0));
+ return {span,series,pipeline:total('pipeline'),won:total('won')};
+}
+// Monotone cubic curve through points: smooth, and never overshoots the data.
+function smooth(pts){
+ const n=pts.length;if(!n)return '';if(n===1)return `M${f1(pts[0][0])},${f1(pts[0][1])}`;
+ const m=[],t=[];for(let i=0;i<n-1;i++)m[i]=(pts[i+1][1]-pts[i][1])/(pts[i+1][0]-pts[i][0]);
+ t[0]=m[0];t[n-1]=m[n-2];for(let i=1;i<n-1;i++)t[i]=m[i-1]*m[i]<=0?0:(m[i-1]+m[i])/2;
+ for(let i=0;i<n-1;i++){if(!m[i]){t[i]=t[i+1]=0;continue;}const a=t[i]/m[i],b=t[i+1]/m[i],s=a*a+b*b;if(s>9){const k=3/Math.sqrt(s);t[i]=k*a*m[i];t[i+1]=k*b*m[i];}}
+ let d=`M${f1(pts[0][0])},${f1(pts[0][1])}`;
+ for(let i=0;i<n-1;i++){const h=(pts[i+1][0]-pts[i][0])/3;d+=`C${f1(pts[i][0]+h)},${f1(pts[i][1]+h*t[i])} ${f1(pts[i+1][0]-h)},${f1(pts[i+1][1]-h*t[i+1])} ${f1(pts[i+1][0])},${f1(pts[i+1][1])}`;}
+ return d;
+}
+function spark(values,{w=120,h=36,color='#0969da',id='s',dot=false,label=''}={}){
+ const max=Math.max(...values,1),min=Math.min(...values,0),pad=4,n=values.length,pts=values.map((v,i)=>[pad+i*(w-pad*2)/Math.max(1,n-1),h-pad-(v-min)/((max-min)||1)*(h-pad*2)]),line=smooth(pts),last=pts.at(-1);
+ return `<svg class="mgr-spark" viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(label)}"><defs><linearGradient id="sg-${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".34"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs><path class="mgr-spark-area" d="${line}L${f1(last[0])},${h}L${f1(pts[0][0])},${h}Z" fill="url(#sg-${id})"/><path class="mgr-draw mgr-spark-line" d="${line}" pathLength="1" stroke="${color}"/>${dot?`<circle class="mgr-spark-halo" cx="${f1(last[0])}" cy="${f1(last[1])}" r="4" fill="${color}"/><circle cx="${f1(last[0])}" cy="${f1(last[1])}" r="4" fill="#fff" stroke="${color}" stroke-width="2.5"/>`:''}</svg>`;
+}
+function ring(pct,{size=56,stroke=6,label=''}={}){
+ const r=(size-stroke)/2,c=size/2,C=2*Math.PI*r,len=Math.max(0,Math.min(100,pct))/100*C;
+ return `<svg class="mgr-ring" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" style="width:${size}px;height:${size}px" role="img" aria-label="${esc(label||Math.round(pct)+'%')}"><circle class="mgr-ring-track" cx="${c}" cy="${c}" r="${f1(r)}" stroke-width="${stroke}"/><circle class="mgr-ring-value" cx="${c}" cy="${c}" r="${f1(r)}" stroke-width="${stroke}" transform="rotate(-90 ${c} ${c})" style="stroke-dasharray:${f1(len)} ${f1(C)}${len<.5?';opacity:0':''}"/></svg>`;
+}
+const seg=(attr,options,current)=>`<div class="mgr-seg" role="group">${options.map(([value,label,count])=>`<button data-${attr}="${esc(value)}" class="${String(value)===String(current)?'active':''}" aria-pressed="${String(value)===String(current)}">${label}${count===undefined?'':`<span>${count}</span>`}</button>`).join('')}</div>`;
+const panelHead=(kicker,title,controls='',extra='')=>`<header class="mgr-panel-head"><div><span class="mgr-kicker">${kicker}</span><h3 class="card-title">${title}</h3>${extra}</div>${controls?`<div class="mgr-controls">${controls}</div>`:''}</header>`;
+function slaStats(m){
+ let on=0,late=0;
+ for(const r of m.leads().filter(r=>r.origin==='crm')){const stage=m.stage(r),due=m.deadline(r);if(stage==='Declined')continue;
+  if(['Assigned','Accepted'].includes(stage)&&due?.overdue||r.acceptedAt&&r.assignedAt&&Date.parse(r.acceptedAt)-Date.parse(r.assignedAt)>48*36e5)late++;else on++;}
+ return {on,late,pct:on+late?Math.round(on*100/(on+late)):100};
+}
+function funnelSteps(m){
+ const leads=m.leads(),st=r=>m.stage(r),is=(r,list)=>list.includes(st(r)),approved=new Set(m.registrations().filter(d=>d.registration==='Approved'&&d.leadId).map(d=>d.leadId));
+ return [['Registered or assigned',leads.length,'all'],['Approved or accepted',leads.filter(r=>is(r,['Approved','Accepted','Working','Qualified','Converted'])||st(r)==='Closed'&&(r.approvedAt||r.acceptedAt)).length,'active'],['Customer contacted',leads.filter(r=>is(r,['Working','Qualified','Converted'])).length,'active'],['Qualified with BANT',leads.filter(r=>is(r,['Qualified','Converted'])).length,'active'],['Registered as deals',leads.filter(r=>is(r,['Converted'])).length,'converted'],['Deals approved',leads.filter(r=>is(r,['Converted'])&&approved.has(r.id)).length,'converted']];
+}
+
+function heroSection(m,d,items,done){
+ const now=new Date(),hour=now.getHours(),hello=hour<12?'Good morning':hour<18?'Good afternoon':'Good evening',quarter='Q'+(Math.floor(now.getMonth()/3)+1)+' '+now.getFullYear();
+ const current=d.pipeline[11],prev=d.pipeline[10],delta=prev?Math.round((current-prev)*100/prev):0,mood=delta>=5?'growing':delta<=-5?'cooling':'holding steady',partners=m.partners().length;
+ return `<section class="mgr-hero mgr-in" style="--i:0"><div class="mgr-hero-copy"><span class="mgr-hero-tag">PARTNER PROGRAM · ${quarter}</span><h1>${hello}, ${MANAGER.name.split(' ')[0]}.</h1><p class="mgr-hero-lede">Partner pipeline is <em>${mood}</em>${delta?`, ${delta>0?'up':'down'} ${Math.abs(delta)}% this month`:''}.</p>${focusCard(m,nextFocus(items),items,done)}</div>
+ <div class="mgr-hero-metric"><div class="mgr-hero-metric-top"><span>Partner-sourced pipeline</span>${prev?`<span class="mgr-delta ${delta>=0?'up':'down'}">${delta>=0?'▲':'▼'} ${Math.abs(delta)}% vs ${d.span[10].label}</span>`:''}</div><strong data-count="${current}" data-fmt="short" data-key="pipeline">${short(current)}</strong><small>Open opportunities across ${partners} partners · updates live</small>${spark(d.pipeline,{w:360,h:92,color:'#79b8ff',id:'hero',dot:true,label:'Partner-sourced pipeline over the last 12 months'})}<div class="mgr-hero-axis"><span>${d.span[0].label}</span><span>${d.span[11].label}</span></div></div></section>`;
+}
+// Up next: the one decision to make now, with its buttons right here.
+function focusCard(m,i,items,done){
+ const total=done+items.length,pct=total?Math.round(done*100/total):100;
+ const progress=!total?'':`<div class="mgr-focus-progress"><span>${done} done today</span><span class="mgr-focus-bar" aria-hidden="true"><i style="width:${pct}%"></i></span><span>${items.length} to go</span></div>`;
+ if(!i)return `<div class="mgr-focus is-clear"><span class="mgr-focus-tag">ALL CLEAR</span><b class="mgr-focus-title">No decisions waiting.</b><small class="mgr-focus-meta">New partner registrations appear here the moment they’re submitted.</small><div class="mgr-focus-actions"><button class="btn mgr-btn-light" data-action="assign">${icon('plus')}Assign a lead</button></div>${progress}</div>`;
+ return `<div class="mgr-focus" data-focus="${esc(i.key)}"><div class="mgr-focus-top"><span class="mgr-focus-tag">UP NEXT · ${items.indexOf(i)+1} OF ${items.length}</span><span class="mgr-focus-kind ${i.sla?'late':''}">${esc(i.kind)}</span></div><div class="mgr-focus-main">${logo(i.r.company)}<div><b class="mgr-focus-title">${esc(i.r.company)}</b><small class="mgr-focus-meta">${itemMeta(m,i)}</small></div></div>${checkChip(i)}<div class="mgr-focus-actions">${actionButtons(i,true)}${items.length>1?`<button class="mgr-focus-skip" data-ov-skip="${esc(i.key)}">Skip ›</button>`:''}</div>${progress}</div>`;
+}
+function kpiSection(m,d){
+ const active=m.leads().filter(r=>['Approved','Accepted','Working','Qualified'].includes(m.stage(r))),mine=active.filter(r=>r.origin!=='crm').length;
+ const opps=m.opportunities(),won=opps.filter(o=>o.stage==='Won').length,lost=opps.filter(o=>o.stage==='Lost').length,rate=won+lost?Math.round(won*100/(won+lost)):0;
+ const won12=d.won.reduce((a,v)=>a+v,0),best=d.won.reduce((b,v,i)=>v>d.won[b]?i:b,0),steps=funnelSteps(m),total=steps[0][1],conv=total?Math.round(steps[4][1]*100/total):0,sla=slaStats(m);
+ const tile=(i,attrs,cls,ic,label,value,viz,foot)=>`<button class="card mgr-kpi2 mgr-in ${cls}" style="--i:${i}" ${attrs}><span class="mgr-kpi-head"><span class="mgr-kpi-icon">${icon(ic)}</span>${label}</span><span class="mgr-kpi-row">${value}${viz}</span><span class="mgr-kpi-foot">${foot}</span></button>`;
+ const ringWrap=(pct,label)=>`<span class="mgr-ring-wrap">${ring(pct,{size:58,stroke:6,label})}<span>${pct}%</span></span>`;
+ return `<section class="mgr-ov-kpis">
+ ${tile(3,'data-page="leads"','','leads','Leads in progress',`<strong data-count="${active.length}" data-key="active">${active.length}</strong>`,`<span class="mgr-split-bar" aria-hidden="true"><i style="--w:${active.length?mine*100/active.length:0}%"></i><i style="--w:${active.length?(active.length-mine)*100/active.length:0}%"></i></span>`,`<span><i class="mgr-key lead"></i>${mine} registered</span><span><i class="mgr-key deal"></i>${active.length-mine} assigned</span>`)}
+ ${tile(4,'data-page="opportunities"','','trophy','Revenue won · 12 months',`<strong data-count="${won12}" data-fmt="short" data-key="won">${short(won12)}</strong>`,ringWrap(rate,'Win rate '+rate+'%'),`<span>Win rate ${rate}%</span><span>Best month ${d.span[best].label}</span>`)}
+ ${tile(5,'data-funnel="converted"','','opportunity','Lead-to-deal conversion',`<strong data-count="${conv}" data-fmt="pct" data-key="conversion">${conv}%</strong>`,`<span class="mgr-mini-cols" aria-hidden="true">${steps.map(([,n],i)=>`<i style="--h:${Math.max(8,total?n*100/total:0)}%;--i:${i}"></i>`).join('')}</span>`,`<span>${steps[4][1]} of ${total} leads registered as deals</span>`)}
+ ${tile(6,'data-page="distribution"',sla.late?'warn':'ok','clock','Response time',`<strong data-count="${sla.pct}" data-fmt="pct" data-key="sla">${sla.pct}%</strong>`,ringWrap(sla.pct,'Responses within the window: '+sla.pct+'%'),`<span>${sla.late?sla.late+' assignment'+(sla.late===1?'':'s')+' need'+(sla.late===1?'s':'')+' you':'Every partner within the response window'}</span>`)}
+ </section>`;
+}
+function trendInner(d){
+ // Phones get a narrower canvas so axis labels stay readable once the chart scales to fit.
+ const narrow=(window.innerWidth||1440)<640,n=ov.range,metric=ov.metric,span=d.span.slice(-n),visible=d.series.filter(s=>!ov.hidden.has(s.id)),W=narrow?380:720,H=narrow?250:268,L=narrow?46:54,R=narrow?8:14,T=16,B=30,pw=W-L-R,ph=H-T-B;
+ const vals=visible.map(s=>s[metric].slice(-n)),totals=span.map((_,i)=>vals.reduce((a,v)=>a+v[i],0)),max=niceMax(Math.max(...totals,1)),y=v=>T+ph-v/max*ph;
+ const colW=pw/n,px=metric==='won'?i=>L+colW*i+colW/2:i=>L+(n<2?pw/2:i*pw/(n-1)),cum=Array(n).fill(0),tops=vals.map(v=>v.map((value,i)=>cum[i]+=value));
+ let body='';
+ if(metric==='pipeline'){
+  body=`<defs>${visible.map((s,si)=>`<linearGradient id="tg-${si}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${s.color}" stop-opacity=".5"/><stop offset="1" stop-color="${s.color}" stop-opacity=".08"/></linearGradient>`).join('')}</defs>`;
+  body+=visible.map((s,si)=>{const top=tops[si].map((v,i)=>[px(i),y(v)]),base=(si?tops[si-1]:Array(n).fill(0)).map((v,i)=>[px(i),y(v)]);return `<path class="mgr-area" style="--d:${si*120}ms" d="${smooth(top)}L${smooth([...base].reverse()).slice(1)}Z" fill="url(#tg-${si})"/>`;}).join('');
+  body+=visible.map((s,si)=>`<path class="mgr-draw mgr-line" style="--d:${si*120}ms" d="${smooth(tops[si].map((v,i)=>[px(i),y(v)]))}" pathLength="1" stroke="${s.color}"/>`).join('');
+ }else{
+  const bw=Math.min(30,colW*.56);
+  body=span.map((_,i)=>{let acc=0;return `<g class="mgr-bar-col" data-col="${i}" style="--d:${i*40}ms">${visible.map((s,si)=>{const v=vals[si][i];if(!v)return '';const y0=y(acc),y1=y(acc+v);acc+=v;return `<rect x="${f1(px(i)-bw/2)}" y="${f1(y1)}" width="${f1(bw)}" height="${f1(Math.max(1.5,y0-y1-1.5))}" rx="3" fill="${s.color}"/>`;}).join('')}</g>`;}).join('');
+ }
+ const grid=[0,.25,.5,.75,1].map(t=>`<g class="mgr-grid-line"><line x1="${L}" x2="${W-R}" y1="${f1(y(max*t))}" y2="${f1(y(max*t))}"/><text x="${L-10}" y="${f1(y(max*t)+4)}" text-anchor="end">${t?short(max*t):'$0'}</text></g>`).join('');
+ const labels=span.map((s,i)=>(n-1-i)%(n>6?2:1)?'':`<text x="${f1(px(i))}" y="${H-8}" text-anchor="middle" class="${i===n-1?'now':''}">${s.label}</text>`).join('');
+ const hover=metric==='pipeline'?`<line class="mgr-guide" x1="0" x2="0" y1="${T}" y2="${T+ph}"/>${visible.map((s,si)=>`<circle class="mgr-hdot" data-s="${si}" r="4.5" cx="${L}" cy="${T+ph}" stroke="${s.color}"/>`).join('')}`:'';
+ trendModel={W,n,metric,span,px,y,tops,totals,rows:visible.map((s,si)=>({name:s.name,color:s.color,values:vals[si]})).reverse()};
+ const now=totals[n-1],prev=totals[n-2]||0,delta=prev?Math.round((now-prev)*100/prev):null;
+ return `${panelHead(metric==='pipeline'?'SOURCED PIPELINE':'REVENUE WON',metric==='pipeline'?'Open pipeline by partner':'Closed-won revenue by month',seg('trend-metric',[['pipeline','Pipeline'],['won','Revenue']],metric)+seg('trend-range',[[6,'6M'],[12,'12M']],n),`<div class="mgr-trend-figure"><strong>${short(now)}</strong>${delta===null?'':`<span class="mgr-delta ${delta>=0?'up':'down'}">${delta>=0?'▲':'▼'} ${Math.abs(delta)}%</span>`}<small>${span[n-1].long}${prev?' · '+short(prev)+' in '+span[n-2].label:''}</small></div>`)}
+ <div class="mgr-legend">${d.series.map(s=>{const off=ov.hidden.has(s.id);return `<button class="mgr-legend-item ${off?'off':''}" data-trend-partner="${s.id}" aria-pressed="${!off}" title="${off?'Show':'Hide'} ${esc(s.name)}"><i style="background:${s.color}"></i>${esc(s.name)}<b>${short(s[metric].at(-1))}</b></button>`;}).join('')}</div>
+ <div class="mgr-plot" id="mgr-trend-plot"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${metric==='pipeline'?'Open pipeline':'Closed-won revenue'} by partner, ${span[0].long} to ${span[n-1].long}. ${span[n-1].label}: ${short(now)}.">${grid}${body}${labels}${hover}</svg><div class="mgr-tip" hidden></div></div>`;
+}
+function mixInner(m){
+ const open=m.opportunities().filter(o=>OPEN.includes(o.stage)),[dimLabel,key,order]=MIX_DIMS[ov.mix],total=sum(open);
+ const keys=[...order,...new Set(open.map(key).filter(k=>!order.includes(k)))],groups=keys.map(k=>({k,list:open.filter(o=>key(o)===k)})).filter(g=>g.list.length).map((g,i)=>({...g,value:sum(g.list),color:MIX_COLORS[i%MIX_COLORS.length]}));
+ const size=176,stroke=22,r=(size-stroke)/2,c=size/2,C=2*Math.PI*r,gap=groups.length>1?3:0;let offset=0;
+ mixModel=groups.map(g=>({label:g.k,value:g.value,pct:total?Math.round(g.value*100/total):0}));
+ const go=g=>ov.mix==='stage'?`data-opp-go="${esc(g.k)}"`:'data-page="opportunities"';
+ const arcs=groups.map((g,i)=>{const len=total?g.value/total*C:0,arc=`<circle class="mgr-seg-arc" data-seg="${i}" ${go(g)} cx="${c}" cy="${c}" r="${f1(r)}" stroke="${g.color}" stroke-width="${stroke}" transform="rotate(-90 ${c} ${c})" style="--d:${i*140}ms;stroke-dasharray:${f1(Math.max(.5,len-gap))} ${f1(C)};stroke-dashoffset:${f1(-offset)}"><title>${esc(g.k)} · ${short(g.value)}</title></circle>`;offset+=len;return arc;}).join('');
+ return `${panelHead('PIPELINE MIX','Where the open pipeline sits',seg('mix',[['stage','Stage'],['region','Territory'],['product','Product']],ov.mix))}
+ ${groups.length?`<div class="mgr-mix-body" id="mgr-mix-chart"><div class="mgr-donut"><svg viewBox="0 0 ${size} ${size}" role="img" aria-label="Open pipeline by ${dimLabel.toLowerCase()}: ${groups.map(g=>g.k+' '+short(g.value)).join(', ')}"><circle class="mgr-donut-track" cx="${c}" cy="${c}" r="${f1(r)}" stroke-width="${stroke}"/>${arcs}</svg><div class="mgr-donut-center"><strong data-default="${short(total)}">${short(total)}</strong><span data-default="Open pipeline · ${open.length} opportunities">Open pipeline · ${open.length} opportunities</span></div></div>
+ <ul class="mgr-mix-legend">${groups.map((g,i)=>`<li><button data-seg="${i}" ${go(g)}><i style="background:${g.color}"></i><span>${esc(g.k)}<small>${g.list.length} opportunit${g.list.length===1?'y':'ies'}</small></span><b>${short(g.value)}</b><em>${mixModel[i].pct}%</em></button></li>`).join('')}</ul></div>`:`<div class="mgr-clear">${icon('opportunity')}<b>No open opportunities yet.</b><span>Approved deal registrations appear here.</span></div>`}`;
+}
+function inboxInner(m){
+ const items=attention(m),is={all:()=>true,lead:i=>i.type==='lead',deal:i=>i.type==='reg',risk:i=>!!i.sla},shown=items.filter(is[ov.inbox]),auto=m.reviewMode()==='auto',focus=nextFocus(items);
+ return `${panelHead('APPROVALS','Decision queue',seg('inbox',[['all','All',items.length],['lead','Leads',items.filter(is.lead).length],['deal','Deals',items.filter(is.deal).length],['risk','At risk',items.filter(is.risk).length]],ov.inbox),'<p class="panel-sub">Oldest first. Decide here, or open the record.</p>')}
+ ${shown.length?`<ol class="mgr-inbox-list">${shown.slice(0,6).map((i,n)=>`<li class="mgr-inbox-row${focus&&i.key===focus.key?' is-focus':''}" style="--i:${n}"><span class="mgr-queue-rank">${items.indexOf(i)+1}</span>${logo(i.r.company)}<div class="mgr-attn-copy"><b>${esc(i.r.company)}</b><small>${itemMeta(m,i)}</small><span class="mgr-inbox-tags"><span class="mgr-attn-kind ${i.sla?'late':''}">${esc(i.kind)}</span>${checkChip(i)}</span></div><div class="mgr-inbox-actions">${actionButtons(i,false)}</div></li>`).join('')}</ol>${shown.length>6?`<p class="mgr-panel-foot">${shown.length-6} more waiting · <button class="text-link" data-page="queue">Open lead reviews</button></p>`:''}`:`<div class="mgr-clear">${icon('check')}<b>${ov.inbox==='all'?'You’re all caught up.':'Nothing here right now.'}</b><span>New partner registrations appear here the moment they’re submitted.</span></div>`}
+ <footer class="mgr-inbox-foot"><span><i class="${auto?'auto':''}"></i>Approval mode · ${auto?'Automatic by program rules':'Manual review'}</span><button class="text-link" data-page="queue">Lead reviews ${icon('arrow')}</button></footer>`;
+}
+// Your day: progress through the queue, what's waiting where, and the controls you reach for most.
+function todayInner(m,items,done){
+ const total=done+items.length,pct=total?Math.round(done*100/total):100,auto=m.reviewMode()==='auto',leads=m.queue().length,regs=m.registrationQueue().length,risk=items.filter(i=>i.sla).length,assigned=m.leads().filter(r=>r.origin==='crm'&&m.stage(r)==='Assigned').length;
+ const row=(label,value,page,tone)=>`<li><button data-page="${page}"><span>${label}</span><b class="${value?tone:''}">${value}</b>${icon('arrow')}</button></li>`;
+ return `${panelHead('TODAY','Your day')}
+ <div class="mgr-today-ring"><span class="mgr-ring-wrap">${ring(pct,{size:92,stroke:9,label:done+' of '+total+' done today'})}<span><b>${done}</b><small>of ${total}</small></span></span><div><b>${items.length?items.length+' to go':'All done'}</b><small>${done} action${done===1?'':'s'} completed today</small></div></div>
+ <ul class="mgr-today-list">${row('Lead registrations',leads,'queue','amber')}${row('Deal registrations',regs,'registrations','amber')}${row('Responses at risk',risk,'distribution','red')}${row('Awaiting partner acceptance',assigned,'distribution','')}</ul>
+ <div class="mgr-today-mode"><span><b>Automatic review</b><small>${auto?'Program rules decide new registrations.':'Every registration waits for you.'}</small></span><button class="toggle ${auto?'on':''}" data-action="mode" role="switch" aria-checked="${auto}" aria-label="Decide registrations automatically by program rules"><span></span></button></div>
+ <footer class="mgr-today-foot"><button class="btn btn-primary" data-action="assign">${icon('plus')}Assign a lead</button></footer>`;
+}
+function funnelInner(m){
+ const steps=funnelSteps(m),top=Math.max(1,steps[0][1]),overall=steps[0][1]?Math.round(steps[4][1]*100/steps[0][1]):0;
+ return `${panelHead('CONVERSION','Lead-to-deal funnel','',`<p class="panel-sub">${overall}% of partner leads become deal registrations. Select a step to see its leads.</p>`)}
+ <ol class="mgr-flow-steps">${steps.map(([label,n,group],i)=>`<li><button class="mgr-flow-step" data-funnel="${group}" style="--i:${i}"><span class="mgr-flow-bar"><i style="--h:${Math.max(6,n*100/top)}%"></i></span><b>${n}</b><span class="mgr-flow-label">${label}</span><small>${i?(steps[i-1][1]?Math.round(n*100/steps[i-1][1]):0)+'% of previous step':'All partner leads'}</small></button></li>`).join('')}</ol>`;
+}
+function boardInner(m,d){
+ const metric=ov.board,rows=m.partners().map(p=>{const s=partnerStats(m,p.id),series=d.series.find(x=>x.id===p.id),won12=series?series.won.reduce((a,v)=>a+v,0):s.wonTotal;return {p,s,pr:PROFILES[p.id]||{},series,won12,value:metric==='won'?won12:metric==='rate'?(s.winRate??-1):s.pipeline};}).sort((a,b)=>b.value-a.value);
+ const max=Math.max(1,...rows.map(r=>r.value)),shown=v=>metric==='rate'?(v<0?'—':v+'%'):short(v),target=sum(rows,r=>r.s.target),reached=sum(rows,r=>r.s.pipeline+r.s.wonTotal),pct=target?Math.round(reached*100/target):0;
+ return `${panelHead('PARTNERS','Partner leaderboard',seg('board',[['pipeline','Pipeline'],['won','Revenue'],['rate','Win rate']],metric))}
+ <ol class="mgr-board-list">${rows.map(({p,s,pr,series,value},i)=>`<li><button class="mgr-lb-row" data-open-partner="${p.id}" style="--i:${i}"><span class="mgr-rank ${i===0?'first':''}">${i+1}</span>${partnerLogo(p.id)}<span class="mgr-lb-name"><b>${esc(p.name)}</b><small>${tier(pr.tier)}${esc(pr.region||'')}</small></span><span class="mgr-lb-spark">${series?spark(series.pipeline.slice(-6),{w:100,h:32,color:series.color,id:'lb'+i,label:p.name+' pipeline, last 6 months'}):''}</span><span class="mgr-lb-metric"><span class="mgr-lb-track"><i style="--w:${Math.max(3,value<0?0:value*100/max)}%;background:${series?.color||'#0969da'}"></i></span><b>${shown(value)}</b><small>${s.active} active lead${s.active===1?'':'s'} · ${s.open.length} open opp${s.open.length===1?'':'s'}</small></span><span class="mgr-lb-target">${ring(s.attainment,{size:40,stroke:4,label:s.attainment+'% of annual target'})}<small>${s.attainment}%<em>of target</em></small></span>${icon('arrow')}</button></li>`).join('')}</ol>
+ <footer class="mgr-board-foot"><div><span>Program sourced vs annual target</span><b>${short(reached)} <em>of ${short(target)}</em></b></div>${progress(pct)}<small>${pct}%</small></footer>`;
+}
+function liveInner(m){
+ const list=feed(m,4),first=seenEvents===null;seenEvents=seenEvents||new Set();
+ const items=list.map(e=>{const k=e.time+'|'+e.text,fresh=!first&&!seenEvents.has(k);seenEvents.add(k);return {...e,fresh};});
+ return `${panelHead('ACTIVITY','Live partner activity',`<span class="mgr-live-pill"><i></i>LIVE</span>`)}
+ ${items.length?`<ul class="mgr-feed">${items.map(e=>`<li class="${e.fresh?'fresh':''}"><span class="mgr-feed-icon">${icon(e.icon)}</span><button ${e.open}><span>${e.text}</span><time>${ago(e.time)}</time></button></li>`).join('')}</ul>`:'<p class="empty">No partner activity yet.</p>'}
+ <footer class="mgr-live-foot"><button class="text-link" data-action="activity">View all activity ${icon('arrow')}</button></footer>`;
+}
 function overviewView(){
- const m=mgr(),queue=m.queue(),regs=m.registrationQueue(),opps=m.opportunities(),open=opps.filter(o=>OPEN.includes(o.stage)),won=opps.filter(o=>o.stage==='Won'),lost=opps.filter(o=>o.stage==='Lost'),items=attention(m),late=items.filter(i=>i.sla).length;
- const hour=new Date().getHours(),hello=hour<12?'Good morning':hour<18?'Good afternoon':'Good evening',today=new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
- const kpi=(ic,label,value,foot,route,tone='')=>`<button class="card mgr-kpi ${tone}" data-page="${route}"><span class="mgr-kpi-head"><span class="mgr-kpi-icon">${icon(ic)}</span>${label}</span><strong>${value}</strong><span class="mgr-kpi-foot">${foot}</span></button>`;
- const winRate=won.length+lost.length?Math.round(won.length*100/(won.length+lost.length))+'% win rate':'No closed deals yet';
- const stages=OPEN.map(stage=>{const list=open.filter(o=>o.stage===stage);return {stage,count:list.length,value:sum(list)};}),top=Math.max(1,...stages.map(s=>s.value));
- const leads=m.leads(),count=list=>leads.filter(r=>list.includes(m.stage(r))).length;
- const flow=[['Awaiting review',count(['Submitted','Needs information'])],['Approved',count(['Approved','Accepted'])],['Working',count(['Working'])],['Qualified',count(['Qualified'])],['Registered as deals',count(['Converted'])]];
- const partners=m.partners().map(p=>({p,s:partnerStats(m,p.id)})).sort((a,b)=>(b.s.pipeline+b.s.wonTotal)-(a.s.pipeline+a.s.wonTotal));
- return `${heading(`${hello}, ${MANAGER.name.split(' ')[0]}.`,`${today} · Here’s your partner program at a glance.`,`<button class="btn btn-outline btn-secondary" data-page="queue">Review approvals</button>${assignButton()}`)}
- <section class="mgr-kpis">${kpi('inbox','Awaiting your decision',queue.length+regs.length,`<span class="mgr-split"><b>${queue.length}</b> lead</span><span class="mgr-split"><b>${regs.length}</b> deal registration${regs.length===1?'':'s'}</span>`,regs.length&&!queue.length?'registrations':'queue',queue.length+regs.length?'focus':'')}${kpi('opportunity','Partner-sourced pipeline',short(sum(open)),open.length+' open opportunit'+(open.length===1?'y':'ies'),'opportunities')}${kpi('trophy','Closed won',short(sum(won,wonValue)),winRate,'opportunities')}${kpi('clock','Response time',late?late+' at risk':'On track',late?'Assignments need reassigning or follow-up':'Every partner is within the response window','distribution',late?'warn':'ok')}</section>
- <div class="mgr-columns"><div class="mgr-col">
- ${panel('Needs your attention',items.length?'Decide registrations oldest first, then fix response-time breaches.':'',items.length?`<ul class="mgr-attention">${items.slice(0,6).map(i=>`<li>${logo(i.r.company)}<div class="mgr-attn-copy"><b>${esc(i.r.company)}</b><small>${esc(m.partnerName(i.r.partnerId))} · ${short(i.r.value)}${i.r.product&&i.r.product!=='Not sure yet'?' · '+esc(i.r.product):''}</small></div><span class="mgr-attn-kind ${i.sla?'late':''}">${esc(i.kind)}</span><time>${ago(i.when)}</time>${i.button}</li>`).join('')}</ul>${items.length>6?`<footer class="card-footer mgr-panel-foot">${items.length-6} more waiting · <button class="text-link" data-page="queue">Open lead reviews</button></footer>`:''}`:`<div class="mgr-clear">${icon('check')}<b>You’re all caught up.</b><span>New partner registrations appear here the moment they’re submitted.</span></div>`)}
- ${panel('Partner performance','Sourced pipeline and closed revenue against each partner’s annual target.',table(['Partner','#Open pipeline','#Closed won','Annual target'],partners.map(({p,s})=>`<tr><td><div class="company-cell">${partnerLogo(p.id)}<span><button class="mgr-partner-link" data-open-partner="${p.id}"><b>${esc(p.name)}</b></button><small>${tier(PROFILES[p.id]?.tier)}</small></span></div></td><td class="numeric amount">${short(s.pipeline)}</td><td class="numeric amount">${short(s.wonTotal)}</td><td class="mgr-target-cell">${progress(s.attainment)}<small>${s.attainment}%</small></td></tr>`),'No partners yet.'),`<button class="text-link" data-page="partners">All partners ${icon('arrow')}</button>`)}
- </div><div class="mgr-col">
- ${panel('Pipeline','Leads and opportunities across all partners.',`<div class="mgr-pipeline"><span class="mgr-mini-label">LEADS</span><ol class="mgr-flow">${flow.map(([label,n])=>`<li><b>${n}</b><span>${label}</span></li>`).join('')}</ol><span class="mgr-mini-label">OPEN OPPORTUNITIES</span><div class="mgr-bars">${stages.map(s=>`<div class="mgr-bar"><span>${s.stage}<small>${s.count}</small></span><span class="mgr-bar-track"><i style="width:${Math.max(3,Math.round(s.value*100/top))}%"></i></span><b>${short(s.value)}</b></div>`).join('')}</div></div>`,`<button class="text-link" data-page="opportunities">View all ${icon('arrow')}</button>`)}
- ${panel('Recent activity','What partners and your team did most recently.',feedList(feed(m,6)))}
- </div></div>`;
+ const m=mgr(),d=programData(m),items=attention(m),done=doneToday(m);
+ return `<div class="mgr-ov">${heroSection(m,d,items,done)}
+ <div class="mgr-ov-grid"><section class="card mgr-panel mgr-in mgr-span-8" style="--i:1" id="mgr-inbox">${inboxInner(m)}</section><section class="card mgr-panel mgr-in mgr-span-4" style="--i:2" id="mgr-today">${todayInner(m,items,done)}</section></div>
+ ${kpiSection(m,d)}
+ <div class="mgr-ov-grid"><section class="card mgr-panel mgr-in mgr-span-8" style="--i:7" id="mgr-trend">${trendInner(d)}</section><section class="card mgr-panel mgr-in mgr-span-4" style="--i:8" id="mgr-mix">${mixInner(m)}</section></div>
+ <div class="mgr-ov-grid"><section class="card mgr-panel mgr-in mgr-span-8" style="--i:9" id="mgr-board">${boardInner(m,d)}</section><section class="card mgr-panel mgr-in mgr-span-4" style="--i:10" id="mgr-live">${liveInner(m)}</section></div>
+ <section class="card mgr-panel mgr-in mgr-funnel-card" style="--i:11" id="mgr-funnel">${funnelInner(m)}</section></div>`;
+}
+// Re-render one card in place, replaying its chart animation.
+function swap(id,inner){const el=document.getElementById(id);if(!el)return;el.innerHTML=inner;el.classList?.remove('mgr-replay');void el.offsetWidth;el.classList?.add('mgr-replay');bindOverview();}
+function bindOverview(){
+ const plot=document.getElementById('mgr-trend-plot');plot?.addEventListener?.('pointermove',trendMove);plot?.addEventListener?.('pointerleave',trendLeave);
+ const mix=document.getElementById('mgr-mix-chart');mix?.addEventListener?.('pointerover',mixOver);mix?.addEventListener?.('pointerout',mixOut);
+}
+function trendMove(e){
+ const plot=e.currentTarget,svg=plot.querySelector('svg'),tip=plot.querySelector('.mgr-tip'),md=trendModel;if(!svg||!tip||!md)return;
+ const box=svg.getBoundingClientRect(),vx=(e.clientX-box.left)/box.width*md.W;let i=0;
+ for(let k=1;k<md.n;k++)if(Math.abs(md.px(k)-vx)<Math.abs(md.px(i)-vx))i=k;
+ if(plot.dataset.at===String(i)&&!tip.hidden)return;plot.dataset.at=String(i);
+ const gx=md.px(i);
+ if(md.metric==='pipeline'){const guide=svg.querySelector('.mgr-guide');guide?.setAttribute('x1',gx);guide?.setAttribute('x2',gx);guide?.classList.add('on');svg.querySelectorAll('.mgr-hdot').forEach(dot=>{dot.setAttribute('cx',gx);dot.setAttribute('cy',md.y(md.tops[+dot.dataset.s][i]));dot.classList.add('on');});}
+ else svg.querySelectorAll('.mgr-bar-col').forEach(col=>col.classList.toggle('dim',col.dataset.col!==String(i)));
+ tip.innerHTML=`<b>${md.span[i].long}</b>${md.rows.map(r=>`<div><i style="background:${r.color}"></i><span>${esc(r.name)}</span><em>${short(r.values[i])}</em></div>`).join('')}<div class="mgr-tip-total"><span>Total</span><em>${short(md.totals[i])}</em></div>`;
+ const left=gx/md.W*100;tip.style.left=left+'%';tip.classList.toggle('flip',left>60);tip.hidden=false;
+}
+function trendLeave(e){const plot=e.currentTarget,svg=plot.querySelector('svg'),tip=plot.querySelector('.mgr-tip');if(tip)tip.hidden=true;delete plot.dataset.at;svg?.querySelector('.mgr-guide')?.classList.remove('on');svg?.querySelectorAll('.mgr-hdot,.mgr-bar-col').forEach(el=>el.classList.remove('on','dim'));}
+function mixOver(e){
+ const hit=e.target.closest?.('[data-seg]'),chart=e.currentTarget;if(!hit)return;const info=mixModel[+hit.dataset.seg];if(!info)return;
+ chart.classList.add('focus');chart.querySelectorAll('[data-seg]').forEach(el=>el.classList.toggle('hot',el.dataset.seg===hit.dataset.seg));
+ const center=chart.querySelector('.mgr-donut-center');if(center){center.children[0].textContent=short(info.value);center.children[1].textContent=info.label+' · '+info.pct+'% of pipeline';}
+}
+function mixOut(e){const chart=e.currentTarget;if(chart.contains(e.relatedTarget))return;chart.classList.remove('focus');chart.querySelectorAll('.hot').forEach(el=>el.classList.remove('hot'));const center=chart.querySelector('.mgr-donut-center');if(center)for(const el of center.children)el.textContent=el.dataset.default;}
+// Numbers count up when the overview opens, and count from old to new when live data changes them.
+function readCounts(){const out={};for(const el of document.querySelectorAll?.('[data-key]')||[])out[el.dataset.key]=Number(el.dataset.count);return out;}
+function animateCounts(before){
+ if(typeof requestAnimationFrame!=='function'||reducedMotion())return;
+ for(const el of document.querySelectorAll('[data-count]')){
+  const to=Number(el.dataset.count),from=before?before[el.dataset.key]:0;if(before&&(from===undefined||from===to))continue;
+  if(before)el.closest('.mgr-kpi2,.mgr-hero-metric')?.classList.add('mgr-bump');
+  const fmt=el.dataset.fmt,draw=v=>{el.textContent=fmt==='short'?short(v):fmt==='pct'?Math.round(v)+'%':String(Math.round(v));},start=performance.now(),dur=before?700:1200;
+  const step=now=>{const p=Math.min(1,(now-start)/dur);draw(from+(to-from)*(1-Math.pow(1-p,3)));if(p<1)requestAnimationFrame(step);};
+  draw(from||0);requestAnimationFrame(step);
+ }
 }
 function queueView(){
  const m=mgr(),queue=m.queue(),auto=m.reviewMode()==='auto',decided=m.leads().filter(r=>(r.vendorLog||[]).some(h=>/^(Registration|Returned)/.test(h.title))).sort((a,b)=>String(b.vendorLog.at(-1).time).localeCompare(String(a.vendorLog.at(-1).time))).slice(0,8);
@@ -169,17 +365,15 @@ function sidebar(){
  const group=(label,items)=>`<div class="nav-group">${label?`<div class="nav-label">${label}</div>`:''}<nav class="nav">${items}</nav></div>`;
  return `<aside class="sidebar${navOpen?' open':''}" aria-label="Manager navigation"><div class="sidebar-header"><span class="brand"><span class="brand-mark"><i></i><i></i><i></i></span>PRM<span>.</span></span><button class="sidebar-close" data-action="menu" aria-label="Close navigation">×</button></div><div class="workspace"><span class="company-icon">VP</span><span class="workspace-copy"><b>Vendor partner team</b><span class="workspace-label">Partner manager workspace</span></span></div><div class="sidebar-scroll">${group('',nav('overview','overview'))}${group('APPROVALS',nav('queue','review')+nav('registrations','book'))}${group('LEADS & PIPELINE',nav('distribution','assign')+nav('leads','leads')+nav('opportunities','opportunity'))}${group('PROGRAM',nav('partners','partners'))}</div><div class="side-bottom"><button class="profile" data-action="signout" title="Sign out"><span class="avatar">${MANAGER.initials}</span><span class="profile-copy"><b>${MANAGER.name}</b><span class="tiny">${MANAGER.title} · Sign out</span></span>${icon('logout')}</button></div></aside>`;
 }
-function signinView(){
- const point=(ic,title,text)=>`<li><span>${icon(ic)}</span><div><b>${title}</b><p>${text}</p></div></li>`;
- return `<main class="mgr-signin"><section class="mgr-signin-story"><div class="brand"><span class="brand-mark"><i></i><i></i><i></i></span>PRM<span>.</span></div><div class="mgr-signin-copy"><span class="mgr-eyebrow">PARTNER MANAGER PORTAL</span><h1>Run your partner program from one place.</h1><ul>${point('review','Approve registrations','Check leads and deals for duplicates, territory, and evidence, then decide in one click.')}${point('assign','Distribute leads','Send vendor leads to the right partner and keep every response on time.')}${point('opportunity','Track partner pipeline','See each partner’s opportunities, wins, and progress to target.')}</ul></div><p class="mgr-signin-note">Vendor workspace · Simulated Salesforce</p></section>
- <section class="mgr-signin-main"><div class="mgr-signin-card"><a class="welcome-back" href="index.html">← Choose a different portal</a><span class="mgr-eyebrow">VENDOR SIGN-IN</span><h2>Welcome back.</h2><p>Sign in to review partner registrations and manage your program.</p><button class="btn btn-primary" data-action="signin">Sign in as ${MANAGER.name} ${icon('arrow')}</button><div class="mgr-signin-divider"><span>or</span></div><button class="btn btn-outline btn-secondary" data-action="signin">${icon('security')}Continue with company SSO</button><p class="tiny">Demo sign-in for ${MANAGER.name}, ${MANAGER.title.toLowerCase()} at the vendor. Nothing is sent anywhere.</p></div></section></main>`;
-}
 function render(){
  const app=document.getElementById('app');
- if(!signedIn){history.replaceState(null,'','#signin');app.innerHTML=signinView();return;}
+ // Partner managers sign in on the shared sign-in screen, then come back here.
+ if(!signedIn){app.innerHTML='<main class="mgr-redirect" aria-live="polite">Opening sign-in…</main>';location.href='index.html#manager';return;}
  if(!views[page])page='overview';
  history.replaceState(null,'','#'+page);
- app.innerHTML=`<div class="mobile-shade${navOpen?' show':''}" data-action="menu"></div>${sidebar()}<div class="main"><header class="topbar"><div class="breadcrumb"><button class="icon-btn mobile-menu" data-action="menu" aria-label="Open navigation">${icon('menu')}</button><span class="breadcrumb-home">${icon('team')} Partner manager</span><span class="breadcrumb-divider">/</span><span>${PAGES[page]}</span></div><div class="top-actions"><span class="mgr-live" title="Partner submissions and updates arrive here instantly."><i></i>Live sync</span><button class="search-trigger" data-action="search" aria-label="Search the program">${icon('search')}<span>Search</span><kbd>⌘ K</kbd></button><button class="icon-btn" data-action="activity" aria-label="Partner activity${unseen?', '+unseen+' new':''}">${icon('bell')}${unseen?'<i class="dot"></i>':''}</button><span class="avatar top-avatar" title="${MANAGER.name}">${MANAGER.initials}</span></div></header><main class="content fade-in">${views[page]()}<footer class="footer-note"><span>${icon('security')}Vendor workspace · Local Salesforce simulation</span><span>Partners see your decisions instantly.</span></footer></main></div>`;
+ const overview=page==='overview',enter=overview&&entrance,before=overview&&!enter?readCounts():null;entrance=false;
+ app.innerHTML=`<div class="mobile-shade${navOpen?' show':''}" data-action="menu"></div>${sidebar()}<div class="main"><header class="topbar"><div class="breadcrumb"><button class="icon-btn mobile-menu" data-action="menu" aria-label="Open navigation">${icon('menu')}</button><span class="breadcrumb-home">${icon('team')} Partner manager</span><span class="breadcrumb-divider">/</span><span>${PAGES[page]}</span></div><div class="top-actions"><span class="mgr-live" title="Partner submissions and updates arrive here instantly."><i></i>Live sync</span><button class="search-trigger" data-action="search" aria-label="Search the program">${icon('search')}<span>Search</span><kbd>⌘ K</kbd></button><button class="icon-btn" data-action="activity" aria-label="Partner activity${unseen?', '+unseen+' new':''}">${icon('bell')}${unseen?'<i class="dot"></i>':''}</button><span class="avatar top-avatar" title="${MANAGER.name}">${MANAGER.initials}</span></div></header><main class="content ${overview?(enter?'mgr-enter':''):'fade-in'}">${views[page]()}<footer class="footer-note"><span>${icon('security')}Vendor workspace · Local Salesforce simulation</span><span>Partners see your decisions instantly.</span></footer></main></div>`;
+ if(overview){bindOverview();animateCounts(enter?null:before);}
 }
 
 // ---- Drawers ----
@@ -327,22 +521,35 @@ window.addEventListener('storage',e=>{
 // ---- Events ----
 function route(){const [name,id]=location.hash.slice(1).split('/');linkedLead=linkedReg=null;if(name==='review'&&id){linkedLead=id;page='queue';}else if(name==='registration'&&id){linkedReg=id;page='registrations';}else if(views[name])page=name;}
 function openLinked(){if(linkedReg)openRegistration(linkedReg);else if(linkedLead)openLead(linkedLead);}
-function signIn(){signedIn=true;try{sessionStorage.setItem(SESSION,'1');}catch{}adopt();takeSnapshot();render();openLinked();toast('Welcome, '+MANAGER.name+'. You’re signed in as the partner manager.');}
 const FILTERS={leadGroup:v=>leadFilter.group=v,leadPartner:v=>leadFilter.partner=v,oppStage:v=>oppFilter.stage=oppFilter.stage===v&&v!=='all'?'all':v,oppPartner:v=>oppFilter.partner=v};
 document.addEventListener('click',e=>{
- const el=e.target.closest('[data-action],[data-page],[data-open],[data-open-reg],[data-open-opp],[data-open-partner],[data-decide],[data-decide-reg],[data-reassign],[data-lead-group],[data-lead-partner],[data-opp-stage],[data-opp-partner]');if(!el)return;
+ const el=e.target.closest('[data-action],[data-page],[data-open],[data-open-reg],[data-open-opp],[data-open-partner],[data-decide],[data-decide-reg],[data-reassign],[data-lead-group],[data-lead-partner],[data-opp-stage],[data-opp-partner],[data-trend-metric],[data-trend-range],[data-trend-partner],[data-mix],[data-inbox],[data-board],[data-opp-go],[data-funnel],[data-quick],[data-ov-skip],[data-quick-reject],[data-quick-return]');if(!el)return;
  const data=el.dataset;
  for(const [key,set] of Object.entries(FILTERS))if(data[key]){set(data[key]);return render();}
+ // Overview controls re-render just their card.
+ if(data.trendMetric||data.trendRange||data.trendPartner){
+  if(data.trendMetric)ov.metric=data.trendMetric;if(data.trendRange)ov.range=Number(data.trendRange);
+  if(data.trendPartner){const id=data.trendPartner;if(ov.hidden.has(id))ov.hidden.delete(id);else if(ov.hidden.size<mgr().partners().length-1)ov.hidden.add(id);else return toast('Keep at least one partner on the chart.');}
+  return swap('mgr-trend',trendInner(programData(mgr())));
+ }
+ if(data.ovSkip){ov.skip.add(data.ovSkip);return render();}
+ if(data.quickReject){const [kind,id]=data.quickReject.split(/:(.*)/);adopt();return kind==='lead'?rejectForm(id):rejectRegistrationForm(id);}
+ if(data.quickReturn){adopt();return returnForm(data.quickReturn);}
+ if(data.mix){ov.mix=data.mix;return swap('mgr-mix',mixInner(mgr()));}
+ if(data.inbox){ov.inbox=data.inbox;return swap('mgr-inbox',inboxInner(mgr()));}
+ if(data.board){ov.board=data.board;const m=mgr();return swap('mgr-board',boardInner(m,programData(m)));}
+ if(data.oppGo){oppFilter={partner:'all',stage:data.oppGo};page='opportunities';closeOverlay();render();window.scrollTo(0,0);return;}
+ if(data.funnel){leadFilter={partner:'all',group:data.funnel};page='leads';closeOverlay();render();window.scrollTo(0,0);return;}
+ if(data.quick){const [kind,id]=data.quick.split(/:(.*)/),lead=kind==='lead';adopt();let company='';try{company=lead?mgr().get(id).company:mgr().registration(id).company;}catch{}if(act(m=>lead?m.approve(id):m.approveRegistration(id),'')){const next=nextFocus(attention(mgr()));toast((lead?'Approved · '+company+'. The partner can start working it.':'Approved · CRM opportunity created for '+company+'.')+(next?' Next up: '+next.r.company+' · '+next.kind.toLowerCase()+'.':' The queue is clear.'));render();}return;}
  if(data.openReg){adopt();return openRegistration(data.openReg);}
  if(data.openOpp){adopt();return openOpportunity(data.openOpp);}
  if(data.openPartner){adopt();return openPartner(data.openPartner);}
  if(data.decideReg){const id=detailId.slice(4);if(data.decideReg==='approve'){const d=act(m=>m.approveRegistration(id),'Approved · CRM opportunity created for '+mgr().registration(id).company+'.');if(d){closeOverlay();render();}}else rejectRegistrationForm(id);return;}
- if(data.page){page=data.page;navOpen=false;closeOverlay();render();window.scrollTo(0,0);return;}
+ if(data.page){entrance=data.page==='overview'&&page!=='overview';page=data.page;navOpen=false;closeOverlay();render();window.scrollTo(0,0);return;}
  if(data.open){adopt();return openLead(data.open);}
  if(data.reassign)return reassignForm(data.reassign);
  if(data.decide){const id=detailId;if(data.decide==='approve'){const r=act(m=>m.approve(id),'Approved · '+mgr().get(id).company+'. The partner can start working it.');if(r){closeOverlay();render();}}else if(data.decide==='return')returnForm(id);else rejectForm(id);return;}
  const action=data.action;
- if(action==='signin')return signIn();
  // Signing out returns to the first screen, where either portal can be chosen.
  if(action==='signout'){signedIn=false;try{sessionStorage.removeItem(SESSION);}catch{}closeOverlay();render();location.href='index.html';return;}
  if(action==='close')return closeOverlay();

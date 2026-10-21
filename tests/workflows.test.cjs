@@ -8,7 +8,8 @@ test('first screen offers the partner and partner manager portals; refresh retur
  const a=environment();assert.match(a.html(),/id="portal-partner"/);assert.match(a.html(),/id="portal-manager"/);assert.doesNotMatch(a.html(),/welcome-login-form/);
  a.run("go('deals')");assert.match(a.html(),/id="portal-partner"/);a.element('portal-partner').onclick();assert.match(a.html(),/welcome-login-form/);assert.match(a.html(),/Choose a different portal/);
  a.element('welcome-back').onclick();assert.match(a.html(),/id="portal-manager"/);
- a.element('portal-manager').onclick();assert.equal(a.context.sessionStorage.getItem('prm-manager-session'),'1');assert.equal(a.location.href,'manager.html#overview');
+ a.element('portal-manager').onclick();assert.match(a.html(),/PARTNER MANAGER SIGN-IN/);assert.match(a.html(),/Continue with Microsoft/);a.element('microsoft-login').onclick();assert.equal(a.context.sessionStorage.getItem('prm-manager-session'),'1');assert.equal(a.location.href,'manager.html#overview');
+ const viaLink=environment(undefined,'#manager');assert.match(viaLink.html(),/PARTNER MANAGER SIGN-IN/);viaLink.submit('welcome-login-form',{email:'riley@vendor.example',password:'x'});assert.equal(viaLink.location.href,'manager.html#overview');
  a.login();assert.match(a.html(),/class="sidebar/);
  a.run("workflow.createLead({company:'Preserved draft'})");const b=environment(a.saved(),'#deals');assert.equal(b.location.hash,'#welcome');assert.match(b.html(),/id="portal-partner"/);assert.equal(b.run('state.crm.connected'),true,'a connected Salesforce stays connected after a refresh');b.login();assert.equal(b.run("workflow.list('lead').filter(l=>l.company==='Preserved draft').length"),1);
  b.run('signOut()');assert.match(b.html(),/id="portal-partner"/);
@@ -88,8 +89,13 @@ test('partner portal exposes no CRM configuration, failure controls, team or app
 });
 
 
-test('one sidebar Leads entry keeps all sales tabs accessible and highlights the current workspace',()=>{
- const a=environment();a.login();for(const route of ['leads','assigned','deals']){a.click({page:route});const sidebar=a.html().match(/<aside class="sidebar[\s\S]*?<\/aside>/)[0];assert.doesNotMatch(sidebar,/data-page="assigned"|data-page="deals"/);assert.match(sidebar,/data-page="leads"[^>]+class="active"/);assert.match(a.html(),/sales-category-tabs/);assert.match(a.html(),/data-page="assigned"/);assert.match(a.html(),/data-page="deals"/)}
+test('sidebar has Leads, Deal Registrations, and CRM Opportunities; lead pages keep their two tabs',()=>{
+ const a=environment();a.login();
+ for(const [route,active] of [['leads','leads'],['assigned','leads'],['deals','deals'],['opportunities','opportunities']]){
+  a.click({page:route});const sidebar=a.html().match(/<aside class="sidebar[\s\S]*?<\/aside>/)[0];
+  for(const p of ['leads','deals','opportunities'])assert.match(sidebar,new RegExp('data-page="'+p+'"'));assert.match(sidebar,new RegExp('data-page="'+active+'"[^>]+class="active"'));
+  if(active==='leads'){assert.match(a.html(),/sales-category-tabs/);assert.match(a.html(),/data-page="assigned"/);}else assert.doesNotMatch(a.html(),/sales-category-tabs/);
+ }
 });
 
 test('Draft column displays two cards and View all exposes the complete list',()=>{
@@ -127,8 +133,29 @@ test('dashboard keeps the journey hero, next moves without timings, stats, and a
  a.click({action:'my-deals'});assert.equal(a.location.hash,'#opportunities');
 });
 
+test('Submit for approval shows a short vendor review, then moves the lead to its next step',()=>{
+ const a=environment();a.login();act(a,'new-lead');a.submit('sales-record-form',leadValues);const id=a.run('detailRecord.id');
+ act(a,'submit-lead','lead',id);assert.match(a.overlay(),/Sending to Salesforce/);a.sync();assert.equal(a.run(`getRecord('lead','${id}').status`),'Submitted');assert.match(a.overlay(),/Vendor review in progress/);assert.match(a.overlay(),/sales-spinner/);
+ assert.ok(a.run('reviewTimer'),'the vendor review is scheduled');a.review();a.sync();
+ assert.equal(a.run(`getRecord('lead','${id}').status`),'Approved');assert.match(a.overlay(),/Log first contact/);assert.match(a.element('toast').textContent,/Lead approved by vendor · Workflow Customer · Approved\. Next: Log first contact\./);
+ a.run("state.sales.crm.reviewMode='manual'");act(a,'new-lead');a.submit('sales-record-form',{...leadValues,company:'Manual Review Co',email:'pat@manualreview.example'});const m=a.run('detailRecord.id');act(a,'submit-lead','lead',m);a.sync();assert.match(a.overlay(),/Check approval status/,'manual review waits for the partner manager');
+});
+
 test('Deal Registrations and CRM Opportunities are separate lists of the same journey',()=>{
  const a=environment();a.login();a.click({page:'deals'});a.click({salesView:'list'});const regs=a.html();assert.match(regs,/Pending approval/);
  a.click({page:'opportunities'});const opps=a.run('scopedRecords().map(d=>d.id).sort().join()');assert.equal(opps,a.run("workflow.list('deal').filter(d=>d.registration==='Approved'&&d.opportunityId).map(d=>d.id).sort().join()"));assert.ok(!opps.includes('D102'),'pending registrations are not opportunities yet');
  assert.match(a.html(),/Proposal|Discovery/);act(a,'open','deal','D103');assert.match(a.overlay(),/CRM opportunity/);assert.match(a.overlay(),/03 · CRM OPPORTUNITY/);
+});
+
+test('Submit for approval on a Draft card runs from the card, shows the review, and moves the lead on',()=>{
+ const a=environment();a.login();a.click({page:'leads'});
+ assert.match(a.html(),/data-sales-action="submit-lead" data-sales-type="lead" data-sales-id="L101" data-card="1"/);
+ a.click({salesAction:'submit-lead',salesType:'lead',salesId:'L101',card:'1'});assert.equal(a.overlay(),'','stays on the board');assert.equal(a.location.hash,'#leads');assert.match(a.html(),/lead-next-loading[^]*Sending to Salesforce/);
+ a.sync();assert.equal(a.run("getRecord('lead','L101').status"),'Submitted');assert.equal(a.overlay(),'');assert.equal(a.run("recordAction(getRecord('lead','L101'),'lead').label"),'Vendor review in progress');
+ a.review();a.sync();assert.equal(a.run("getRecord('lead','L101').status"),'Approved');assert.equal(a.overlay(),'');assert.match(a.element('toast').textContent,/Lead approved by vendor · Cedar Analytics · Approved\. Next: Log first contact\./);
+ assert.equal(a.run("recordAction(getRecord('lead','L101'),'lead').action"),'first-contact');
+ // A step that needs a dialog opens it from the card and comes back to the board.
+ a.click({salesAction:'first-contact',salesType:'lead',salesId:'L101',card:'1'});assert.match(a.overlay(),/sales-activity-form/);
+ a.submit('sales-activity-form',{type:'Call',outcome:'Connected',note:'Intro call with the sponsor.'});assert.equal(a.overlay(),'');assert.equal(a.location.hash,'#leads');
+ a.click({salesAction:'qualify',salesType:'lead',salesId:'L101',card:'1'});assert.match(a.overlay(),/sales-qualify-form/);a.click({salesAction:'open',salesType:'lead',salesId:'L101'});assert.equal(a.overlay(),'','Cancel closes the dialog');
 });

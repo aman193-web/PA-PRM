@@ -5,10 +5,12 @@ const fixed='2026-10-15T12:00:00.000Z';
 const values=(company)=>({company,contact:'Taylor Reed',email:'taylor@'+company.toLowerCase().replace(/[^a-z]/g,'')+'.example',value:82000,region:'North America',need:'Consolidate customer sales reporting across regional offices.',consent:true});
 const assignment={partnerId:'partner-acme',company:'Copperleaf Hotels',contact:'Sam Okafor',email:'sam@copperleaf.example',region:'Europe',product:'Sales Cloud',value:'72000',source:'Vendor webinar',need:'Bring bookings and sales follow-ups into one workspace.'};
 // One workspace seen from both sides: the partner's workflow and the vendor's partner manager.
-function both(){const state={crm:{connected:true}};W.initialize(state);return {state,s:state.sales,partner:W.create(state,{now:()=>fixed}),manager:W.manage(state,{now:()=>fixed,reviewer:'Riley Chen'})};}
+function both(mode='manual'){const state={crm:{connected:true}};W.initialize(state);state.sales.crm.reviewMode=mode;return {state,s:state.sales,partner:W.create(state,{now:()=>fixed}),manager:W.manage(state,{now:()=>fixed,reviewer:'Riley Chen'})};}
 function submitted(e,company){const l=e.partner.createLead(values(company));e.partner.submitLead(l.id);e.partner.sync();return l;}
 
-test('manual review is the default: registrations wait for the partner manager',()=>{
+test('automatic review is the default; in manual review, registrations wait for the partner manager',()=>{
+ assert.equal(both('auto').manager.reviewMode(),'auto');const fresh={crm:{connected:true}};W.initialize(fresh);assert.equal(fresh.sales.crm.reviewMode,'auto');
+ fresh.sales.crm.reviewMode='manual';W.initialize(fresh);assert.equal(fresh.sales.crm.reviewMode,'manual','a manager’s choice of manual review is kept');
  const e=both();assert.equal(e.manager.reviewMode(),'manual');const l=submitted(e,'Waiting Co');assert.equal(l.status,'Submitted');assert.ok(l.reviewReason===''||!l.reviewReason);
  for(let i=0;i<3;i++)e.partner.sync();assert.equal(l.status,'Submitted');assert.ok(e.manager.queue().some(r=>r.crmId===l.crmId));assert.ok(e.manager.queue().some(r=>r.crmId==='00Q-L102'));
  const rev=e.s.crm.managerRev||0;e.manager.approve(l.crmId);assert.equal(e.s.crm.managerRev,rev+1);assert.equal(e.s.crm.leads[l.crmId].status,'Approved');assert.equal(e.s.crm.leads[l.crmId].protectedUntil,'2027-01-13');assert.equal(l.status,'Submitted','partner sees it after syncing');
@@ -59,10 +61,11 @@ test('converted leads show as Converted to the manager once the registration is 
 });
 
 // ---- Manager portal UI ----
-const managerApp=saved=>{const m=environment(saved,'',['sales-workflow.js','manager.js']);m.click({action:'signin'});return m;};
+// A partner manager who signed in on the shared sign-in screen.
+const managerApp=saved=>environment(saved,'',['sales-workflow.js','manager.js'],{session:{'prm-manager-session':'1'}});
 test('manager signs in, reviews the queue, and approves with one click',()=>{
- const m=environment(undefined,'',['sales-workflow.js','manager.js']);assert.match(m.html(),/Sign in as Riley Chen/);m.click({action:'signin'});
- assert.match(m.html(),/<h1>Good (morning|afternoon|evening), Riley\.<\/h1>/);assert.match(m.html(),/Awaiting your decision/);assert.match(m.html(),/nav-badge/);assert.match(m.html(),/Live sync/);
+ const out=environment(undefined,'',['sales-workflow.js','manager.js']);assert.equal(out.location.href,'index.html#manager','signed-out visits go to the shared sign-in');const m=managerApp();
+ assert.match(m.html(),/<h1>Good (morning|afternoon|evening), Riley\.<\/h1>/);assert.match(m.html(),/Decision queue/);assert.match(m.html(),/nav-badge/);assert.match(m.html(),/Live sync/);
  m.click({page:'queue'});assert.match(m.html(),/<h1>Lead reviews<\/h1>/);assert.match(m.html(),/Meridian Logistics/);assert.match(m.html(),/No duplicates/);
  m.click({open:'00Q-L102'});assert.match(m.overlay(),/Recommended: Approve/);assert.match(m.overlay(),/No duplicate records/);assert.match(m.overlay(),/In program territory · North America/);
  m.click({decide:'approve'});assert.equal(m.overlay(),'');assert.equal(m.saved().sales.crm.leads['00Q-L102'].status,'Approved');assert.match(m.html(),/No registrations waiting/);assert.match(m.element('toast').textContent,/Approved · Meridian Logistics/);
@@ -82,7 +85,7 @@ test('manager return, reject, assign, and reassign forms validate and save',()=>
 });
 
 test('the partner and manager portals stay in sync across tabs',()=>{
- const p=environment();p.run("beginOnboarding();handleEntryAction('connect');confirmSetupConnection();handleEntryAction('next');handleEntryAction('finish')");
+ const p=environment();p.run("state.sales.crm.reviewMode='manual';beginOnboarding();handleEntryAction('connect');confirmSetupConnection();handleEntryAction('next');handleEntryAction('finish')");
  const m=managerApp(p.saved());
  // Partner submits; the manager tab hears about it immediately.
  p.click({salesAction:'new-lead'});p.submit('sales-record-form',{...values('Live Sync Co'),value:'82000',consent:'on'});const id=p.run('detailRecord.id');p.click({salesAction:'submit-lead',salesType:'lead',salesId:id});p.sync();
@@ -97,11 +100,12 @@ test('the partner and manager portals stay in sync across tabs',()=>{
 
 test('every manager view and form renders balanced markup with bound labels',()=>{
  const check=html=>{const ids=[...html.matchAll(/\sid="([^"]+)"/g)].map(x=>x[1]);assert.equal(new Set(ids).size,ids.length);for(const x of html.matchAll(/<label\b[^>]*\bfor="([^"]+)"/g))assert.ok(ids.includes(x[1]));const stack=[],voids=new Set(['input','img','br','hr','meta','link']);for(const x of html.matchAll(/<\/?([a-z][a-z0-9-]*)\b[^>]*>/gi)){const tag=x[1];if(voids.has(tag)||x[0].endsWith('/>'))continue;if(x[0].startsWith('</'))assert.equal(stack.pop(),tag);else stack.push(tag);}assert.deepEqual(stack,[]);};
- const m=environment(undefined,'',['sales-workflow.js','manager.js']);check(m.html());m.click({action:'signin'});
+ const m=managerApp();check(m.html());
  for(const page of ['overview','queue','registrations','distribution','leads','opportunities','partners']){m.click({page});check(m.html());}
  for(const id of ['partner-acme','another-partner','partner-cobalt']){m.click({openPartner:id});check(m.overlay());}
  for(const id of ['006-D103','006-N302','006-linkable','006-conflict']){m.click({openOpp:id});check(m.overlay());}
- m.click({openReg:'REG-D102'});check(m.overlay());m.click({action:'search'});check(m.overlay());m.click({action:'activity'});check(m.overlay());
+ m.click({openReg:'REG-D102'});check(m.overlay());m.click({action:'search'});check(m.overlay());m.click({action:'activity'});check(m.overlay());m.click({action:'close'});
+ m.click({page:'overview'});m.click({trendMetric:'won'});check(m.element('mgr-trend').innerHTML);for(const mix of ['region','product'])m.click({mix});check(m.element('mgr-mix').innerHTML);m.click({inbox:'risk'});check(m.element('mgr-inbox').innerHTML);m.click({board:'rate'});check(m.element('mgr-board').innerHTML);
  for(const id of ['00Q-L102','00Q-L104','00Q-L105','00Q-L103']){m.click({open:id});check(m.overlay());}
  m.click({open:'00Q-L102'});m.click({decide:'return'});check(m.overlay());m.click({open:'00Q-L102'});m.click({decide:'reject'});check(m.overlay());m.click({action:'assign'});check(m.overlay());
 });
@@ -127,7 +131,7 @@ test('conflicting or out-of-territory deal registrations are flagged, and reject
 });
 
 test('manager portal reviews deal registrations, with a nav badge, drawer checks, and live partner updates',()=>{
- const p=environment();p.run("beginOnboarding();handleEntryAction('connect');confirmSetupConnection();handleEntryAction('next');handleEntryAction('finish')");
+ const p=environment();p.run("state.sales.crm.reviewMode='manual';beginOnboarding();handleEntryAction('connect');confirmSetupConnection();handleEntryAction('next');handleEntryAction('finish')");
  const m=managerApp(p.saved());assert.match(m.html(),/data-open-reg="REG-D102"/);m.click({page:'registrations'});
  assert.match(m.html(),/<h1>Deal registrations<\/h1>/);assert.match(m.html(),/data-open-reg="REG-D102"/);assert.match(m.html(),/Large deal/);assert.match(m.html(),/Recently decided/);
  // The partner registers a deal in the portal; the manager hears about it.
@@ -145,13 +149,38 @@ test('manager portal reviews deal registrations, with a nav badge, drawer checks
 });
 
 // ---- High-fidelity manager portal ----
-test('overview summarizes approvals, pipeline, partner performance, and recent activity',()=>{
+test('overview is a premium dashboard: hero, KPI tiles, charts, approvals, funnel, leaderboard, and live activity',()=>{
  const m=managerApp();const html=m.html();
- for(const text of ['Awaiting your decision','Partner-sourced pipeline','Closed won','Response time','Needs your attention','Pipeline','Partner performance','Recent activity'])assert.match(html,new RegExp(text));
- assert.match(html,/data-open="00Q-L102"/);assert.match(html,/data-open-reg="REG-D102"/);
- for(const name of ['Acme Partners','Northbridge Consulting','Cobalt Systems'])assert.match(html,new RegExp(name));
- assert.match(html,/Cobalt Systems<\/b> accepted <b>Vantage Robotics/);
- m.click({action:'activity'});assert.match(m.overlay(),/aria-label="Partner activity"/);assert.match(m.overlay(),/Northbridge Consulting<\/b> logged a call with <b>Harrow Aviation/);
+ assert.match(html,/<h1>Good (morning|afternoon|evening), Riley\.<\/h1>/);
+ for(const text of ['Partner-sourced pipeline','UP NEXT · 1 OF 2','Decision queue','Your day','Leads in progress','Revenue won · 12 months','Lead-to-deal conversion','Response time','Open pipeline by partner','Where the open pipeline sits','Lead-to-deal funnel','Partner leaderboard','Live partner activity'])assert.match(html,new RegExp(text));
+ for(const chart of ['class="mgr-spark"','class="mgr-area"','class="mgr-seg-arc"','class="mgr-ring-value"','class="mgr-flow-step"','class="mgr-lb-row"'])assert.ok(html.includes(chart),chart);
+ assert.match(html,/data-count="840000" data-fmt="short" data-key="pipeline">\$840K</);
+ assert.match(html,/data-open="00Q-L102"/);assert.match(html,/data-open-reg="REG-D102"/);assert.match(html,/All 5 checks passed/);
+ for(const name of ['Acme Partners','Northbridge Consulting','Cobalt Systems'])assert.match(html,new RegExp('data-open-partner="[^"]+" style="--i:\\d"><span class="mgr-rank[^"]*">\\d</span><span class="mgr-plogo[^"]*">[A-Z]{2}</span><span class="mgr-lb-name"><b>'+name));
+ m.click({action:'activity'});assert.match(m.overlay(),/aria-label="Partner activity"/);assert.match(m.overlay(),/Cobalt Systems<\/b> accepted <b>Vantage Robotics/);assert.match(m.overlay(),/Northbridge Consulting<\/b> logged a call with <b>Harrow Aviation/);
+});
+
+test('overview charts respond to their controls without leaving the page',()=>{
+ const m=managerApp();
+ m.click({trendMetric:'won'});let t=m.element('mgr-trend').innerHTML;assert.match(t,/Closed-won revenue by month/);assert.equal((t.match(/class="mgr-bar-col"/g)||[]).length,12);assert.doesNotMatch(t,/mgr-area/);
+ m.click({trendRange:'6'});t=m.element('mgr-trend').innerHTML;assert.equal((t.match(/class="mgr-bar-col"/g)||[]).length,6);
+ m.click({trendMetric:'pipeline'});m.click({trendPartner:'partner-cobalt'});t=m.element('mgr-trend').innerHTML;assert.match(t,/mgr-legend-item off" data-trend-partner="partner-cobalt"/);assert.equal((t.match(/class="mgr-area"/g)||[]).length,2);
+ m.click({trendPartner:'partner-acme'});m.click({trendPartner:'another-partner'});assert.match(m.element('toast').textContent,/at least one partner/);assert.equal((m.element('mgr-trend').innerHTML.match(/class="mgr-area"/g)||[]).length,1);
+ m.click({mix:'region'});let x=m.element('mgr-mix').innerHTML;for(const region of ['North America','Europe','Asia Pacific'])assert.match(x,new RegExp(region));assert.match(x,/data-mix="region" class="active"/);
+ m.click({mix:'product'});assert.match(m.element('mgr-mix').innerHTML,/Service Cloud/);
+ m.click({inbox:'deal'});let i=m.element('mgr-inbox').innerHTML;assert.match(i,/data-open-reg="REG-D102"/);assert.doesNotMatch(i,/data-open="00Q-L102"/);
+ m.click({inbox:'risk'});assert.match(m.element('mgr-inbox').innerHTML,/Nothing here right now/);
+ m.click({board:'won'});const b=m.element('mgr-board').innerHTML;assert.match(b,/data-board="won" class="active"/);assert.ok(b.indexOf('Northbridge Consulting')<b.indexOf('Acme Partners'),'sorted by 12-month revenue');
+});
+
+test('overview drill-throughs and one-click approvals update the dashboard live',()=>{
+ const m=managerApp();
+ m.click({oppGo:'Negotiation'});assert.match(m.html(),/<h1>Opportunities<\/h1>/);assert.match(m.html(),/Tidewater Ports/);assert.doesNotMatch(m.html(),/Summit Networks/);
+ m.click({page:'overview'});m.click({funnel:'converted'});assert.match(m.html(),/<h1>All partner leads<\/h1>/);assert.match(m.html(),/Bluefin Shipping/);assert.doesNotMatch(m.html(),/Lumen Biotech/);
+ m.click({page:'overview'});assert.match(m.html(),/data-quick="lead:00Q-L102"/);
+ m.click({quick:'lead:00Q-L102'});assert.equal(m.saved().sales.crm.leads['00Q-L102'].status,'Approved');assert.match(m.element('toast').textContent,/Approved · Meridian Logistics/);const inbox=m.html().split('id="mgr-inbox"')[1].split('id="mgr-today"')[0];assert.doesNotMatch(inbox,/00Q-L102/);assert.match(m.html().split('id="mgr-live"')[1],/Riley Chen: registration approved · <b>Meridian Logistics/);
+ const pipeline=()=>Number(m.html().match(/data-count="(\d+)" data-fmt="short" data-key="pipeline"/)[1]),before=pipeline();
+ m.click({quick:'reg:REG-D102'});assert.equal(m.saved().sales.crm.registrations['REG-D102'].registration,'Approved');assert.equal(pipeline()-before,310000);assert.match(m.html(),/No decisions waiting/);
 });
 
 test('partners page shows tier, performance, and target; a partner drawer lists their leads and opportunities',()=>{
@@ -184,7 +213,19 @@ test('all partner leads filter by stage group and partner; search finds partners
 });
 
 test('manager pages do not link to the partner portal; sign-out returns to the first screen',()=>{
- const m=environment(undefined,'',['sales-workflow.js','manager.js']);assert.match(m.html(),/href="index.html">← Choose a different portal/);m.click({action:'signin'});
+ const m=managerApp();
  for(const page of ['overview','queue','registrations','distribution','leads','opportunities','partners']){m.click({page});assert.doesNotMatch(m.html(),/index\.html|partner portal/i);}
  m.click({action:'signout'});assert.equal(m.location.href,'index.html');assert.equal(m.context.sessionStorage.getItem('prm-manager-session'),null);
+});
+
+test('overview is action first: up next, quick decisions, skip, and progress through the day',()=>{
+ const m=managerApp();let html=m.html();
+ const focus=()=>m.html().match(/<div class="mgr-focus"[\s\S]*?<div class="mgr-focus-progress">/)[0];
+ assert.match(focus(),/Meridian Logistics/);assert.match(focus(),/data-quick="lead:00Q-L102"/);assert.match(focus(),/data-ov-skip="lead:00Q-L102"/);assert.match(html,/0 done today/);
+ assert.match(html,/id="mgr-today"/);assert.match(html,/Lead registrations<\/span><b class="amber">1<\/b>/);assert.match(html,/data-action="mode"/);
+ m.click({ovSkip:'lead:00Q-L102'});assert.match(focus(),/Atlas Manufacturing/);assert.match(focus(),/UP NEXT · 2 OF 2/);
+ m.click({quickReject:'reg:REG-D102'});assert.match(m.overlay(),/aria-label="Reject registration"/);m.click({action:'close'});
+ m.click({quickReturn:'00Q-L102'});assert.match(m.overlay(),/aria-label="Return for information"/);m.click({action:'close'});
+ m.click({quick:'reg:REG-D102'});assert.match(m.element('toast').textContent,/Next up: Meridian Logistics · lead registration\./);assert.match(m.html(),/1 done today/);assert.match(focus(),/Meridian Logistics/);
+ m.click({quick:'lead:00Q-L102'});assert.match(m.element('toast').textContent,/The queue is clear\./);assert.match(m.html(),/ALL CLEAR/);assert.match(m.html(),/2 done today/);
 });
